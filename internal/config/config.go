@@ -33,21 +33,18 @@ type Config struct {
 }
 
 func LoadConfig() (*Config, error) {
-	if err := godotenv.Load(); err != nil {
-		return nil, envLoadError
-	}
-
+	_ = godotenv.Load()
 	c := &Config{
 		App: AppConfig{
 			Env:  getEnv("APP_ENV", "dev"),
 			Port: getEnv("APP_PORT", "8080"),
 		},
 		Database: DatabaseConfig{
-			Host:     getEnv("DATABASE_HOST", "localhost"),
-			Port:     getEnv("DATABASE_PORT", "5432"),
-			Name:     getEnv("DATABASE_NAME", "postgres"),
-			Password: getEnv("DATABASE_PASSWORD", "postgres"),
-			User:     getEnv("DATABASE_USER", "postgres"),
+			Host:     getEnv("DB_HOST", "localhost"),
+			Port:     getEnv("DB_PORT", "5432"),
+			Name:     getEnv("DB_NAME", "postgres"),
+			Password: getEnv("DB_PASSWORD", "postgres"),
+			User:     getEnv("DB_USER", "postgres"),
 		},
 	}
 	err := makeDbUrl(c)

@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"context"
@@ -32,6 +32,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	logger.Debug("Logger init success")
 
 	// TODO db init
 	db, err := db.NewDatabase(ctx, cfg.Database.URL, logger)
@@ -39,6 +40,7 @@ func main() {
 		logger.Fatal("Database init error", zap.Error(err))
 	}
 	defer db.Close()
+	logger.Debug("Database init success")
 
 	// TODO layers init
 

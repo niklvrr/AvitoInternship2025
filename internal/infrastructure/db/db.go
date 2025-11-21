@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"github.com/golang-migrate/migrate/v4"
-
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -55,12 +54,12 @@ func mustRunMigrations(dbUrl string, logger *zap.Logger) {
 		if err := mg.Force(int(version)); err != nil {
 			logger.Fatal("failed to force migration version", zap.Error(err))
 		}
-		logger.Info("dirty state cleared, retrying migration")
+		logger.Debug("dirty state cleared, retrying migration")
 	}
 
 	if err := mg.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		logger.Fatal("migration run err", zap.Error(err))
 	}
 
-	logger.Info("migration run ok")
+	logger.Debug("migration run ok")
 }
