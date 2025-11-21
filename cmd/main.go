@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/db"
 
 	"github.com/niklvrr/AvitoInternship2025/internal/config"
@@ -37,6 +38,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Database init error", zap.Error(err))
 	}
+	defer db.Close()
 
 	// TODO layers init
 
