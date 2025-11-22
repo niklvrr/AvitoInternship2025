@@ -52,37 +52,44 @@ func NewPrService(repo PrRepository, log *zap.Logger) *PrService {
 }
 
 func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*response.CreateResponse, error) {
+	// Парсим автора
 	authorId, err := uuid.Parse(req.AuthorId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
 	}
 
+	// Берем всех участников команды автора
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, authorId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
-	reviewers, err := findReviewers(potentialReviewers, authorId, reviewerCountForCreate)
+	// Ищем активных ревьюеров и исключаем автора
+	reviewers, err := findReviewers(potentialReviewers, reviewerCountForCreate, authorId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
+	// Парсим идентификатор PR
 	prId, err := uuid.Parse(req.PrId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
 	}
 
+	// Формируем DTO для репозитория
 	dto := &dto.CreatPrDTO{
 		PrId:     prId,
 		PrName:   req.PrName,
 		AuthorId: authorId,
 	}
 
+	// Создаем PR в базе
 	res, err := s.repo.Create(ctx, dto, reviewers)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
+	// Собираем ответ
 	var assignedReviewers []string
 	for _, reviewer := range res.AssignedReviewers {
 		assignedReviewers = append(assignedReviewers, reviewer.String())
@@ -94,71 +101,86 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 		AuthorId:          res.AuthorId.String(),
 		Status:            res.Status,
 		AssignedReviewers: assignedReviewers,
+		CreatedAt:         formatTimeValue(res.CreatedAt),
+		MergedAt:          formatTimePtr(res.MergedAt),
 	}, nil
 }
 
 func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*response.MergeResponse, error) {
+	// Парсим идентификатор PR
 	prId, err := uuid.Parse(req.PrId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
 	}
 
+	// Формируем DTO
 	dto := &dto.MergePrDTO{
 		PrId: prId,
 	}
 
+	// Обновляем статус PR
 	res, err := s.repo.Merge(ctx, dto)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", mergeError, err)
 	}
 
+	// Собираем список ревьюеров
 	var assignedReviewers []string
 	for _, reviewer := range res.AssignedReviewers {
 		assignedReviewers = append(assignedReviewers, reviewer.String())
 	}
 
+	// Готовим ответ
 	return &response.MergeResponse{
 		PrId:              res.Id.String(),
 		PrName:            res.Name,
 		AuthorId:          res.AuthorId.String(),
 		Status:            res.Status,
 		AssignedReviewers: assignedReviewers,
+		MergedAt:          res.MergedAt.String(),
 	}, nil
 }
 
 func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) (*response.ReassignResponse, error) {
+	// Парсим идентификатор PR
 	prId, err := uuid.Parse(req.PrId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
 	}
 
-	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, prId)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", reassignError, err)
-	}
-
-	newReviewer, err := findReviewers(potentialReviewers, prId, reviewerCountForReassign)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", reassignError, err)
-	}
-	newReviewerId := *newReviewer[0]
-
+	// Парсим идентификатор заменяемого ревьюера
 	oldReviewerId, err := uuid.Parse(req.OldReviewerId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
 	}
 
+	// Берем всех участников команды заменяемого ревьюера
+	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, oldReviewerId)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
+	}
+
+	// Ищем новую кандидатуру
+	newReviewer, err := findReviewers(potentialReviewers, reviewerCountForReassign, oldReviewerId)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
+	}
+	newReviewerId := *newReviewer[0]
+
+	// Формируем DTO
 	dto := &dto.ReassignPrDTO{
 		PrId:          prId,
 		OldReviewerId: oldReviewerId,
-		ReplacedBy:    newReviewerId,
+		NewReviewerId: newReviewerId,
 	}
 
+	// Проводим замену в базе
 	res, err := s.repo.Reassign(ctx, dto)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
+	// Собираем ответ
 	var assignedReviewers []string
 	for _, reviewer := range res.Pr.AssignedReviewers {
 		assignedReviewers = append(assignedReviewers, reviewer.String())
@@ -171,6 +193,8 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		Status:            res.Pr.Status,
 		AssignedReviewers: assignedReviewers,
 		ReplacedBy:        res.ReplacedBy.String(),
+		CreatedAt:         formatTimeValue(res.Pr.CreatedAt),
+		MergedAt:          formatTimePtr(res.Pr.MergedAt),
 	}, nil
 }
 
