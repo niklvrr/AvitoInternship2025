@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
+	"math/rand"
+	"strings"
+	"time"
+
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/request"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/response"
 	"go.uber.org/zap"
-	"math/rand"
-	"time"
 )
 
 var (
@@ -29,18 +30,16 @@ const (
 
 // Интерфейс репозитория
 type PrRepository interface {
-	Create(ctx context.Context, dto *dto.CreatPrDTO, prReviewers []*uuid.UUID) (*result.PrResult, error)
+	Create(ctx context.Context, dto *dto.CreatPrDTO, prReviewers []string) (*result.PrResult, error)
 	Merge(ctx context.Context, dto *dto.MergePrDTO) (*result.PrResult, error)
 	Reassign(ctx context.Context, dto *dto.ReassignPrDTO) (*result.ReassignResult, error)
-	SelectPotentialReviewers(ctx context.Context, userId uuid.UUID) ([]*domain.User, error)
-	SelectAuthorOfPr(ctx context.Context, prId uuid.UUID) (*uuid.UUID, error)
+	SelectPotentialReviewers(ctx context.Context, userId string) ([]*domain.User, error)
 }
 
 // TODO добавить логирование
+// TODO добавить комментарии
 // TODO сделать pull в develop
-// TODO изменить тип id с uuid на string
 
-// Интерфейс репозитория
 type PrService struct {
 	repo PrRepository
 	log  *zap.Logger
@@ -54,197 +53,197 @@ func NewPrService(repo PrRepository, log *zap.Logger) *PrService {
 }
 
 func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*response.CreateResponse, error) {
-	authorId, err := uuid.Parse(req.AuthorId)
+	authorId, err := normalizeID(req.AuthorId, "author_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectId, err)
+		return nil, err
 	}
 
-	// Запрос в бд для чтения всех возможных ревьюеров
+	// Читаем всех членов команды автора
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, authorId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
-	// Находим до 2 ревьюеров с is_active=true, если ревьюеров нет возращаем ошибку
-	reviewers, err := findReviewers(potentialReviewers, reviewerCountForCreate, authorId)
+	// Ищем до двух активных ревьюеров, исключая автора
+	reviewers, err := findReviewers(potentialReviewers, authorId, reviewerCountForCreate)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
-	prId, err := uuid.Parse(req.PrId)
+	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectId, err)
+		return nil, err
 	}
 
-	// Собираем dto
 	dto := &dto.CreatPrDTO{
 		PrId:     prId,
 		PrName:   req.PrName,
 		AuthorId: authorId,
 	}
 
-	// Запрос в бд для создания pull request
 	res, err := s.repo.Create(ctx, dto, reviewers)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
+	// Готовим список назначенных ревьюеров для ответа
 	var assignedReviewers []string
 	for _, reviewer := range res.AssignedReviewers {
-		assignedReviewers = append(assignedReviewers, reviewer.String())
+		assignedReviewers = append(assignedReviewers, reviewer)
 	}
 
-	// Ответ
 	return &response.CreateResponse{
-		PrId:              res.Id.String(),
+		PrId:              res.Id,
 		PrName:            res.Name,
-		AuthorId:          res.AuthorId.String(),
+		AuthorId:          res.AuthorId,
 		Status:            res.Status,
 		AssignedReviewers: assignedReviewers,
+		CreatedAt:         formatTime(res.CreatedAt),
+		MergedAt:          formatTimePtr(res.MergedAt),
 	}, nil
 }
 
 func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*response.MergeResponse, error) {
-	prId, err := uuid.Parse(req.PrId)
+	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectId, err)
+		return nil, err
 	}
 
-	// Собираем dto
 	dto := &dto.MergePrDTO{
 		PrId: prId,
 	}
 
-	// Запрос в бд для изменения статуса pr
 	res, err := s.repo.Merge(ctx, dto)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", mergeError, err)
 	}
 
+	// Готовим список ревьюеров
 	var assignedReviewers []string
 	for _, reviewer := range res.AssignedReviewers {
-		assignedReviewers = append(assignedReviewers, reviewer.String())
+		assignedReviewers = append(assignedReviewers, reviewer)
 	}
 
-	// Ответ
 	return &response.MergeResponse{
-		PrId:              res.Id.String(),
+		PrId:              res.Id,
 		PrName:            res.Name,
-		AuthorId:          res.AuthorId.String(),
+		AuthorId:          res.AuthorId,
 		Status:            res.Status,
 		AssignedReviewers: assignedReviewers,
+		CreatedAt:         formatTime(res.CreatedAt),
+		MergedAt:          formatTimePtr(res.MergedAt),
 	}, nil
 }
 
 func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) (*response.ReassignResponse, error) {
-	prId, err := uuid.Parse(req.PrId)
+	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectId, err)
+		return nil, err
 	}
 
-	// Запрос в бд для чтения всех возможных ревьюеров
-	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, prId)
+	// Парсим идентификатор старого ревьюера
+	oldReviewerId, err := normalizeID(req.OldReviewerId, "old_reviewer_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", reassignError, err)
+		return nil, err
 	}
 
-	// Запрос в бд для чтения author_id для pr
-	authorId, err := s.repo.SelectAuthorOfPr(ctx, prId)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", reassignError, err)
-	}
-
-	// Находим 1 ревьюера с is_active=true, если ревьюеров нет возращаем ошибку
-	newReviewer, err := findReviewers(potentialReviewers, reviewerCountForReassign, *authorId, prId)
+	// Читаем всех членов команды старого ревьюера
+	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, oldReviewerId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
-	newReviewerId := *newReviewer[0]
 
-	oldReviewerId, err := uuid.Parse(req.OldReviewerId)
+	// Ищем нового активного ревьюера, исключая старого
+	newReviewer, err := findReviewers(potentialReviewers, oldReviewerId, reviewerCountForReassign)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectId, err)
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
+	newReviewerId := newReviewer[0]
 
-	// Собираем dto
+	// Собираем dto для репозитория
 	dto := &dto.ReassignPrDTO{
 		PrId:          prId,
 		OldReviewerId: oldReviewerId,
 		ReplacedBy:    newReviewerId,
 	}
 
-	// Запрос в бд для переназначения
 	res, err := s.repo.Reassign(ctx, dto)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
+	// Готовим список ревьюеров для ответа
 	var assignedReviewers []string
 	for _, reviewer := range res.Pr.AssignedReviewers {
-		assignedReviewers = append(assignedReviewers, reviewer.String())
+		assignedReviewers = append(assignedReviewers, reviewer)
 	}
 
-	// Ответ
 	return &response.ReassignResponse{
-		PrId:              res.Pr.Id.String(),
+		PrId:              res.Pr.Id,
 		PrName:            res.Pr.Name,
-		AuthorId:          res.Pr.AuthorId.String(),
+		AuthorId:          res.Pr.AuthorId,
 		Status:            res.Pr.Status,
 		AssignedReviewers: assignedReviewers,
-		ReplacedBy:        res.ReplacedBy.String(),
+		ReplacedBy:        res.ReplacedBy,
+		CreatedAt:         formatTime(res.Pr.CreatedAt),
+		MergedAt:          formatTimePtr(res.Pr.MergedAt),
 	}, nil
 }
 
-// вспомогательная функция поиска подходящих ревьюеров
-func findReviewers(potentialReviewers []*domain.User, reviewerCount int, ids ...uuid.UUID) ([]*uuid.UUID, error) {
+func findReviewers(potentialReviewers []*domain.User, excludedId string, reviewerCount int) ([]string, error) {
 	var reviewers []*domain.User
 	for _, potentialReviewer := range potentialReviewers {
 		if potentialReviewer == nil {
 			continue
 		}
 
-		// Фильтруем ревьеров по id (например на случай, если reviewer_id=author_id)
-		flag := false
-		for _, id := range ids {
-			if id == potentialReviewer.Id {
-				flag = true
-				break
-			}
-		}
-		if flag {
+		if potentialReviewer.Id == excludedId {
 			continue
 		}
 
-		// Фильтуем по is_active
 		if potentialReviewer.IsActive == false {
 			continue
 		}
 
-		// Если ревьюер подходит по всем учловиям то добавляем
 		reviewers = append(reviewers, potentialReviewer)
 	}
 
-	// Если ревьюеров нет возращаем ошибку
 	if len(reviewers) == 0 {
 		return nil, noPotentialReviewerError
 	}
 
-	// Случайно перемешиваем слайс ревьюеров
 	rand.New(rand.NewSource(time.Now().UnixNano())).Shuffle(len(reviewers), func(i, j int) {
 		reviewers[i], reviewers[j] = reviewers[j], reviewers[i]
 	})
 
-	// меняем reviewerCount, если осталось меньше
 	if len(reviewers) < reviewerCount {
 		reviewerCount = len(reviewers)
 	}
 
-	// отбираем первых reviewerCount ревьюеров
-	result := make([]*uuid.UUID, 0, reviewerCount)
+	result := make([]string, 0, reviewerCount)
 	for i := 0; i < reviewerCount; i++ {
-		id := reviewers[i].Id
-		result = append(result, &id)
+		result = append(result, reviewers[i].Id)
 	}
 
 	return result, nil
+}
+
+func formatTime(t time.Time) string {
+	return t.UTC().Format(time.RFC3339)
+}
+
+func formatTimePtr(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	formatted := formatTime(*t)
+	return &formatted
+}
+
+func normalizeID(raw, field string) (string, error) {
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		return "", fmt.Errorf("%w: %s is empty", incorrectIdError, field)
+	}
+	return id, nil
 }

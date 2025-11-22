@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
@@ -15,17 +17,18 @@ SET is_active = $1
 WHERE id = $2`
 
 	selectUserQuery = `
-SELECT * FROM users WHERE id = $1`
+SELECT id, name, team_name, is_active, created_at
+FROM users
+WHERE id = $1`
 
 	getReviewQuery = `
 SELECT
     p.id,
     p.name,
     p.author_id,
-    p.team_id,
     p.status,
     p.created_at,
-    p.merged_at,
+    p.merged_at
 FROM pr_reviewers prr
 JOIN prs p ON prr.pr_id = p.id
 WHERE prr.user_id = $1
@@ -53,11 +56,12 @@ func (r *UserRepository) SetIsActive(ctx context.Context, d *dto.SetIsActiveDTO)
 		return nil, errNotFound
 	}
 
-	// Чтение данных для ответа
+	// Читаем пользователя повторно, чтобы вернуть актуальные данные
 	user := &domain.User{}
 	err = r.db.QueryRow(ctx, selectUserQuery, d.UserId).Scan(
 		&user.Id,
 		&user.Name,
+		&user.TeamName,
 		&user.IsActive,
 		&user.CreatedAt,
 	)
@@ -70,7 +74,7 @@ func (r *UserRepository) SetIsActive(ctx context.Context, d *dto.SetIsActiveDTO)
 }
 
 func (r *UserRepository) GetReview(ctx context.Context, d *dto.GetReviewDTO) (*result.GetReviewResult, error) {
-	// Чтение всех pr, где пользователь назначен ревьюером
+	// Читаем все PR, где пользователь назначен ревьюером
 	rows, err := r.db.Query(ctx, getReviewQuery, d.UserId)
 	if err != nil {
 		return nil, handleDBError(err)
@@ -80,16 +84,20 @@ func (r *UserRepository) GetReview(ctx context.Context, d *dto.GetReviewDTO) (*r
 	var prs []*domain.Pr
 	for rows.Next() {
 		pr := &domain.Pr{}
+		var mergedAt sql.NullTime
 		err = rows.Scan(
 			&pr.Id,
 			&pr.Name,
 			&pr.AuthorId,
 			&pr.Status,
 			&pr.CreatedAt,
-			&pr.MergedAt,
+			&mergedAt,
 		)
 		if err != nil {
 			return nil, handleDBError(err)
+		}
+		if mergedAt.Valid {
+			pr.MergedAt = &mergedAt.Time
 		}
 		prs = append(prs, pr)
 	}

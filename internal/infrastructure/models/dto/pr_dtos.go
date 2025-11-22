@@ -1,19 +1,17 @@
 package dto
 
-import "github.com/google/uuid"
-
 type CreatPrDTO struct {
-	PrId     uuid.UUID
+	PrId     string
 	PrName   string
-	AuthorId uuid.UUID
+	AuthorId string
 }
 
 type MergePrDTO struct {
-	PrId uuid.UUID
+	PrId string
 }
 
 type ReassignPrDTO struct {
-	PrId          uuid.UUID
-	OldReviewerId uuid.UUID
-	ReplacedBy    uuid.UUID
+	PrId          string
+	OldReviewerId string
+	ReplacedBy    string
 }

@@ -6,6 +6,8 @@ type CreateResponse struct {
 	AuthorId          string   `json:"author_id"`
 	Status            string   `json:"status"`
 	AssignedReviewers []string `json:"assigned_reviewers"`
+	CreatedAt         string   `json:"createdAt"`
+	MergedAt          *string  `json:"mergedAt,omitempty"`
 }
 
 type MergeResponse struct {
@@ -14,7 +16,8 @@ type MergeResponse struct {
 	AuthorId          string   `json:"author_id"`
 	Status            string   `json:"status"`
 	AssignedReviewers []string `json:"assigned_reviewers"`
-	MergedAt          string   `json:"merged_at"`
+	CreatedAt         string   `json:"createdAt"`
+	MergedAt          *string  `json:"mergedAt,omitempty"`
 }
 
 type ReassignResponse struct {
@@ -24,4 +27,6 @@ type ReassignResponse struct {
 	Status            string   `json:"status"`
 	AssignedReviewers []string `json:"assigned_reviewers"`
 	ReplacedBy        string   `json:"replaced_by"`
+	CreatedAt         string   `json:"createdAt"`
+	MergedAt          *string  `json:"mergedAt,omitempty"`
 }
