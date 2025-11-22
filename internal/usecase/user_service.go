@@ -14,7 +14,6 @@ import (
 )
 
 var (
-	incorrectIdError = errors.New("incorrect user id")
 	setIsActiveError = errors.New("set user status error")
 	getReviewError   = errors.New("get review error")
 )
