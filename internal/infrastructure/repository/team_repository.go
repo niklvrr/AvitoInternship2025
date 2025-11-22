@@ -11,6 +11,7 @@ import (
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
+	"go.uber.org/zap"
 )
 
 const (
@@ -54,16 +55,20 @@ ORDER BY u.created_at ASC;`
 )
 
 type TeamRepository struct {
-	db *pgxpool.Pool
+	db  *pgxpool.Pool
+	log *zap.Logger
 }
 
-func NewTeamRepository(db *pgxpool.Pool) *TeamRepository {
+func NewTeamRepository(db *pgxpool.Pool, log *zap.Logger) *TeamRepository {
 	return &TeamRepository{
-		db: db,
+		db:  db,
+		log: log,
 	}
 }
 
 func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.AddTeamResult, error) {
+	r.log.Info("add team started", zap.String("team_name", d.TeamName))
+
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return nil, handleDBError(err)
@@ -74,9 +79,11 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 	var existingTeamId string
 	err = tx.QueryRow(ctx, teamExistsQuery, d.TeamName).Scan(&existingTeamId)
 	if err == nil {
+		r.log.Warn("team already exists", zap.String("team_name", d.TeamName))
 		return nil, errAlreadyExists
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
+		r.log.Error("failed to check existing team", zap.String("team_name", d.TeamName), zap.Error(err))
 		return nil, handleDBError(err)
 	}
 
@@ -94,6 +101,7 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 		&createdAt,
 	)
 	if err != nil {
+		r.log.Error("failed to insert team", zap.String("team_name", d.TeamName), zap.Error(err))
 		return nil, handleDBError(err)
 	}
 
@@ -112,19 +120,34 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 			&member.CreatedAt,
 		)
 		if err != nil {
+			r.log.Error("failed to upsert user for team",
+				zap.String("team_name", d.TeamName),
+				zap.String("user_id", member.Id),
+				zap.Error(err),
+			)
 			return nil, handleDBError(err)
 		}
 
 		// Добавляем пользователя в команду
 		if _, err = tx.Exec(ctx, insertTeamMemberQuery, teamId, member.Id); err != nil {
+			r.log.Error("failed to add team member",
+				zap.String("team_name", d.TeamName),
+				zap.String("user_id", member.Id),
+				zap.Error(err),
+			)
 			return nil, handleDBError(err)
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
+		r.log.Error("failed to commit add team tx", zap.String("team_name", d.TeamName), zap.Error(err))
 		return nil, handleDBError(err)
 	}
 
+	r.log.Info("team added",
+		zap.String("team_name", teamName),
+		zap.Int("members", len(d.Members)),
+	)
 	// Ответ
 	return &result.AddTeamResult{
 		TeamName: teamName,
@@ -133,9 +156,12 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 }
 
 func (r *TeamRepository) Get(ctx context.Context, d *dto.GetTeamDTO) (*result.GetTeamResult, error) {
+	r.log.Info("get team started", zap.String("team_name", d.TeamName))
+
 	// Чтение команды и всех участников
 	rows, err := r.db.Query(ctx, getTeamQuery, d.TeamName)
 	if err != nil {
+		r.log.Error("failed to read team", zap.String("team_name", d.TeamName), zap.Error(err))
 		return nil, handleDBError(err)
 	}
 	defer rows.Close()
@@ -152,11 +178,19 @@ func (r *TeamRepository) Get(ctx context.Context, d *dto.GetTeamDTO) (*result.Ge
 			&member.CreatedAt,
 		)
 		if err != nil {
+			r.log.Error("failed to scan team member",
+				zap.String("team_name", d.TeamName),
+				zap.Error(err),
+			)
 			return nil, handleDBError(err)
 		}
 		members = append(members, member)
 	}
 
+	r.log.Info("team loaded",
+		zap.String("team_name", d.TeamName),
+		zap.Int("members", len(members)),
+	)
 	// Ответ
 	return &result.GetTeamResult{
 		TeamName: d.TeamName,

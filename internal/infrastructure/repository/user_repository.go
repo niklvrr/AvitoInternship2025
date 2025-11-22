@@ -8,6 +8,7 @@ import (
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
+	"go.uber.org/zap"
 )
 
 const (
@@ -36,23 +37,35 @@ ORDER BY p.created_at DESC;`
 )
 
 type UserRepository struct {
-	db *pgxpool.Pool
+	db  *pgxpool.Pool
+	log *zap.Logger
 }
 
-func NewUserRepository(db *pgxpool.Pool) *UserRepository {
+func NewUserRepository(db *pgxpool.Pool, log *zap.Logger) *UserRepository {
 	return &UserRepository{
-		db: db,
+		db:  db,
+		log: log,
 	}
 }
 
 func (r *UserRepository) SetIsActive(ctx context.Context, d *dto.SetIsActiveDTO) (*domain.User, error) {
+	r.log.Info("set user activity",
+		zap.String("user_id", d.UserId),
+		zap.Bool("is_active", d.IsActive),
+	)
+
 	// Изменение поле is_active
 	cmdTag, err := r.db.Exec(ctx, setIsActiveQuery, d.IsActive, d.UserId)
 	if err != nil {
+		r.log.Error("set user activity failed",
+			zap.String("user_id", d.UserId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 
 	if cmdTag.RowsAffected() == 0 {
+		r.log.Warn("user not found while updating activity", zap.String("user_id", d.UserId))
 		return nil, errNotFound
 	}
 
@@ -66,17 +79,31 @@ func (r *UserRepository) SetIsActive(ctx context.Context, d *dto.SetIsActiveDTO)
 		&user.CreatedAt,
 	)
 	if err != nil {
+		r.log.Error("failed to read user after activity update",
+			zap.String("user_id", d.UserId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 
+	r.log.Info("user activity updated",
+		zap.String("user_id", user.Id),
+		zap.Bool("is_active", user.IsActive),
+	)
 	// Ответ
 	return user, nil
 }
 
 func (r *UserRepository) GetReview(ctx context.Context, d *dto.GetReviewDTO) (*result.GetReviewResult, error) {
+	r.log.Info("get user reviews", zap.String("user_id", d.UserId))
+
 	// Читаем все PR, где пользователь назначен ревьюером
 	rows, err := r.db.Query(ctx, getReviewQuery, d.UserId)
 	if err != nil {
+		r.log.Error("failed to load user reviews",
+			zap.String("user_id", d.UserId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 	defer rows.Close()
@@ -102,6 +129,10 @@ func (r *UserRepository) GetReview(ctx context.Context, d *dto.GetReviewDTO) (*r
 		prs = append(prs, pr)
 	}
 
+	r.log.Info("user reviews loaded",
+		zap.String("user_id", d.UserId),
+		zap.Int("prs", len(prs)),
+	)
 	// Ответ
 	return &result.GetReviewResult{
 		UserId: d.UserId,

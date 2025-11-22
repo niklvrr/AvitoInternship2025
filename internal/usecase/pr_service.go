@@ -14,8 +14,6 @@ import (
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/request"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/response"
 	"go.uber.org/zap"
-	"math/rand"
-	"time"
 )
 
 var (
@@ -38,10 +36,6 @@ type PrRepository interface {
 	SelectPotentialReviewers(ctx context.Context, userId string) ([]*domain.User, error)
 }
 
-// TODO добавить логирование
-// TODO добавить комментарии
-// TODO сделать pull в develop
-
 type PrService struct {
 	repo PrRepository
 	log  *zap.Logger
@@ -59,16 +53,28 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 	if err != nil {
 		return nil, err
 	}
+	s.log.Info("create PR request accepted",
+		zap.String("pr_id", req.PrId),
+		zap.String("author_id", authorId),
+	)
 
 	// Читаем всех членов команды автора
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, authorId)
 	if err != nil {
+		s.log.Error("failed to load potential reviewers",
+			zap.String("author_id", authorId),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
 	// Ищем до двух активных ревьюеров, исключая автора
 	reviewers, err := findReviewers(potentialReviewers, authorId, reviewerCountForCreate)
 	if err != nil {
+		s.log.Warn("no reviewers available",
+			zap.String("author_id", authorId),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
@@ -85,6 +91,10 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 
 	res, err := s.repo.Create(ctx, dto, reviewers)
 	if err != nil {
+		s.log.Error("failed to create PR",
+			zap.String("pr_id", prId),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
@@ -93,6 +103,11 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 	for _, reviewer := range res.AssignedReviewers {
 		assignedReviewers = append(assignedReviewers, reviewer)
 	}
+
+	s.log.Info("PR created",
+		zap.String("pr_id", res.Id),
+		zap.Strings("assigned_reviewers", assignedReviewers),
+	)
 
 	return &response.CreateResponse{
 		PrId:              res.Id,
@@ -110,6 +125,7 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 	if err != nil {
 		return nil, err
 	}
+	s.log.Info("merge PR request accepted", zap.String("pr_id", prId))
 
 	dto := &dto.MergePrDTO{
 		PrId: prId,
@@ -117,6 +133,10 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 
 	res, err := s.repo.Merge(ctx, dto)
 	if err != nil {
+		s.log.Error("failed to merge PR",
+			zap.String("pr_id", prId),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("%w: %w", mergeError, err)
 	}
 
@@ -125,6 +145,11 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 	for _, reviewer := range res.AssignedReviewers {
 		assignedReviewers = append(assignedReviewers, reviewer)
 	}
+
+	s.log.Info("PR merged",
+		zap.String("pr_id", res.Id),
+		zap.String("status", res.Status),
+	)
 
 	return &response.MergeResponse{
 		PrId:              res.Id,
@@ -148,16 +173,29 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 	if err != nil {
 		return nil, err
 	}
+	s.log.Info("reassign reviewer request accepted",
+		zap.String("pr_id", prId),
+		zap.String("old_reviewer_id", oldReviewerId),
+	)
 
 	// Читаем всех членов команды старого ревьюера
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, oldReviewerId)
 	if err != nil {
+		s.log.Error("failed to load team members for reassign",
+			zap.String("old_reviewer_id", oldReviewerId),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
 	// Ищем нового активного ревьюера, исключая старого
 	newReviewer, err := findReviewers(potentialReviewers, oldReviewerId, reviewerCountForReassign)
 	if err != nil {
+		s.log.Warn("no replacement reviewer available",
+			zap.String("pr_id", prId),
+			zap.String("old_reviewer_id", oldReviewerId),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 	newReviewerId := newReviewer[0]
@@ -171,6 +209,12 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 
 	res, err := s.repo.Reassign(ctx, dto)
 	if err != nil {
+		s.log.Error("failed to reassign reviewer",
+			zap.String("pr_id", prId),
+			zap.String("old_reviewer_id", oldReviewerId),
+			zap.String("new_reviewer_id", newReviewerId),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
@@ -179,6 +223,12 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 	for _, reviewer := range res.Pr.AssignedReviewers {
 		assignedReviewers = append(assignedReviewers, reviewer)
 	}
+
+	s.log.Info("reviewer reassigned",
+		zap.String("pr_id", res.Pr.Id),
+		zap.Strings("assigned_reviewers", assignedReviewers),
+		zap.String("replaced_by", res.ReplacedBy),
+	)
 
 	return &response.ReassignResponse{
 		PrId:              res.Pr.Id,

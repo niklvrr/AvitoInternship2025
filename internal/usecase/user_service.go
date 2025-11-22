@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
@@ -41,6 +42,10 @@ func (s *UserService) SetIsActive(ctx context.Context, req *request.SetIsActiveR
 	if err != nil {
 		return nil, err
 	}
+	s.log.Info("set user activity request accepted",
+		zap.String("user_id", userId),
+		zap.Bool("is_active", req.IsActive),
+	)
 
 	// Собираем dto
 	dto := &dto.SetIsActiveDTO{
@@ -51,9 +56,17 @@ func (s *UserService) SetIsActive(ctx context.Context, req *request.SetIsActiveR
 	// Запрос в бд
 	res, err := s.repo.SetIsActive(ctx, dto)
 	if err != nil {
+		s.log.Error("failed to update user activity",
+			zap.String("user_id", userId),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf(`%w: %w`, setIsActiveError, err)
 	}
 
+	s.log.Info("user activity updated",
+		zap.String("user_id", userId),
+		zap.Bool("is_active", res.IsActive),
+	)
 	// Ответ
 	return &response.SetIsActiveResponse{
 		UserId:   userId,
@@ -69,6 +82,7 @@ func (s *UserService) GetReview(ctx context.Context, req *request.GetReviewReque
 	if err != nil {
 		return nil, err
 	}
+	s.log.Info("get reviews request accepted", zap.String("user_id", userId))
 
 	// Собираем dto
 	dto := &dto.GetReviewDTO{
@@ -78,9 +92,14 @@ func (s *UserService) GetReview(ctx context.Context, req *request.GetReviewReque
 	// Запрос в бд
 	res, err := s.repo.GetReview(ctx, dto)
 	if err != nil {
+		s.log.Error("failed to load user reviews", zap.String("user_id", userId), zap.Error(err))
 		return nil, fmt.Errorf(`%w: %w`, getReviewError, err)
 	}
 
+	s.log.Info("user reviews fetched",
+		zap.String("user_id", userId),
+		zap.Int("prs", len(res.Prs)),
+	)
 	// Ответ
 	return &response.GetReviewResponse{
 		UserId: userId,

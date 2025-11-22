@@ -9,6 +9,7 @@ import (
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
+	"go.uber.org/zap"
 )
 
 const (
@@ -57,14 +58,24 @@ WHERE id = $1;`
 )
 
 type PrRepository struct {
-	db *pgxpool.Pool
+	db  *pgxpool.Pool
+	log *zap.Logger
 }
 
-func NewPrRepository(db *pgxpool.Pool) *PrRepository {
-	return &PrRepository{db: db}
+func NewPrRepository(db *pgxpool.Pool, log *zap.Logger) *PrRepository {
+	return &PrRepository{
+		db:  db,
+		log: log,
+	}
 }
 
 func (r *PrRepository) Create(ctx context.Context, d *dto.CreatPrDTO, prReviewers []string) (*result.PrResult, error) {
+	r.log.Info("create PR started",
+		zap.String("pr_id", d.PrId),
+		zap.String("author_id", d.AuthorId),
+		zap.Int("reviewers_requested", len(prReviewers)),
+	)
+
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return nil, handleDBError(err)
@@ -84,6 +95,10 @@ func (r *PrRepository) Create(ctx context.Context, d *dto.CreatPrDTO, prReviewer
 		&mergedAt,
 	)
 	if err != nil {
+		r.log.Error("failed to insert PR",
+			zap.String("pr_id", d.PrId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 	if mergedAt.Valid {
@@ -97,22 +112,34 @@ func (r *PrRepository) Create(ctx context.Context, d *dto.CreatPrDTO, prReviewer
 			continue
 		}
 		if _, err := tx.Exec(ctx, insertPrReviewerQuery, prMemberId, prRes.Id); err != nil {
+			r.log.Error("failed to insert PR reviewer",
+				zap.String("pr_id", d.PrId),
+				zap.String("reviewer_id", prMemberId),
+				zap.Error(err),
+			)
 			return nil, handleDBError(err)
 		}
 		assignedReviewers = append(assignedReviewers, prMemberId)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
+		r.log.Error("failed to commit PR creation", zap.String("pr_id", d.PrId), zap.Error(err))
 		return nil, handleDBError(err)
 	}
 
 	prRes.AssignedReviewers = assignedReviewers
 
+	r.log.Info("PR created",
+		zap.String("pr_id", prRes.Id),
+		zap.Int("assigned_reviewers", len(prRes.AssignedReviewers)),
+	)
 	// Ответ
 	return prRes, nil
 }
 
 func (r *PrRepository) Merge(ctx context.Context, d *dto.MergePrDTO) (*result.PrResult, error) {
+	r.log.Info("merge PR started", zap.String("pr_id", d.PrId))
+
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return nil, handleDBError(err)
@@ -122,6 +149,7 @@ func (r *PrRepository) Merge(ctx context.Context, d *dto.MergePrDTO) (*result.Pr
 	// Получаем текущее состояние pr
 	prRes, err := readPr(ctx, tx, d.PrId)
 	if err != nil {
+		r.log.Error("failed to load PR before merge", zap.String("pr_id", d.PrId), zap.Error(err))
 		return nil, handleDBError(err)
 	}
 
@@ -129,6 +157,10 @@ func (r *PrRepository) Merge(ctx context.Context, d *dto.MergePrDTO) (*result.Pr
 	if prRes.Status != "MERGED" {
 		cmdTag, err := tx.Exec(ctx, mergePrQuery, d.PrId)
 		if err != nil {
+			r.log.Error("failed to update PR status to MERGED",
+				zap.String("pr_id", d.PrId),
+				zap.Error(err),
+			)
 			return nil, handleDBError(err)
 		}
 
@@ -136,6 +168,10 @@ func (r *PrRepository) Merge(ctx context.Context, d *dto.MergePrDTO) (*result.Pr
 			// PR уже в состоянии MERGED, перечитываем состояние
 			prRes, err = readPr(ctx, tx, d.PrId)
 			if err != nil {
+				r.log.Error("failed to reload merged PR state",
+					zap.String("pr_id", d.PrId),
+					zap.Error(err),
+				)
 				return nil, handleDBError(err)
 			}
 		} else {
@@ -149,19 +185,37 @@ func (r *PrRepository) Merge(ctx context.Context, d *dto.MergePrDTO) (*result.Pr
 	// Чтение всех ревьюеров этого pr
 	prReviewers, err := readReviewers(ctx, tx, d.PrId)
 	if err != nil {
+		r.log.Error("failed to read PR reviewers after merge",
+			zap.String("pr_id", d.PrId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 	prRes.AssignedReviewers = prReviewers
 
 	if err := tx.Commit(ctx); err != nil {
+		r.log.Error("failed to commit merge transaction",
+			zap.String("pr_id", d.PrId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 
+	r.log.Info("PR merged",
+		zap.String("pr_id", prRes.Id),
+		zap.String("status", prRes.Status),
+	)
 	// Ответ
 	return prRes, nil
 }
 
 func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*result.ReassignResult, error) {
+	r.log.Info("reassign reviewer started",
+		zap.String("pr_id", d.PrId),
+		zap.String("old_reviewer_id", d.OldReviewerId),
+		zap.String("new_reviewer_id", d.ReplacedBy),
+	)
+
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return nil, handleDBError(err)
@@ -171,6 +225,10 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 	// Убедимся, что PR существует
 	prRes, err := readPr(ctx, tx, d.PrId)
 	if err != nil {
+		r.log.Error("failed to load PR before reassign",
+			zap.String("pr_id", d.PrId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 
@@ -182,9 +240,18 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 	// Удалить старого ревьюера из таблицы pr_reviewers
 	cmdTag, err := tx.Exec(ctx, deletePrReviewerQuery, d.PrId, d.OldReviewerId)
 	if err != nil {
+		r.log.Error("failed to remove old reviewer",
+			zap.String("pr_id", d.PrId),
+			zap.String("old_reviewer_id", d.OldReviewerId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 	if cmdTag.RowsAffected() == 0 {
+		r.log.Warn("old reviewer not found on PR",
+			zap.String("pr_id", d.PrId),
+			zap.String("old_reviewer_id", d.OldReviewerId),
+		)
 		return nil, errNotFound
 	}
 
@@ -196,14 +263,27 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 	// Чтение всех ревьюеров для этого pr
 	prReviewers, err := readReviewers(ctx, tx, d.PrId)
 	if err != nil {
+		r.log.Error("failed to read reviewers after reassign",
+			zap.String("pr_id", d.PrId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 	prRes.AssignedReviewers = prReviewers
 
 	if err := tx.Commit(ctx); err != nil {
+		r.log.Error("failed to commit reassign transaction",
+			zap.String("pr_id", d.PrId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 
+	r.log.Info("reviewer reassigned",
+		zap.String("pr_id", prRes.Id),
+		zap.Strings("assigned_reviewers", prRes.AssignedReviewers),
+		zap.String("replaced_by", d.ReplacedBy),
+	)
 	// Ответ
 	return &result.ReassignResult{
 		Pr:         prRes,
@@ -213,16 +293,26 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 
 // вспомогательная функция для поиска возможных ревьюеров, вызывается в сервисном слое для выбора ревьеров для pr
 func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId string) ([]*domain.User, error) {
+	r.log.Debug("select potential reviewers", zap.String("user_id", userId))
+
 	// Чтение команды пользователя
 	var teamId string
 	err := r.db.QueryRow(ctx, selectTeamQuery, userId).Scan(&teamId)
 	if err != nil {
+		r.log.Error("failed to load team for user",
+			zap.String("user_id", userId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 
 	// Чтение всех участников команды
 	rows, err := r.db.Query(ctx, selectTeamMembersQuery, teamId)
 	if err != nil {
+		r.log.Error("failed to load team members",
+			zap.String("team_id", teamId),
+			zap.Error(err),
+		)
 		return nil, handleDBError(err)
 	}
 	defer rows.Close()
@@ -243,6 +333,10 @@ func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId stri
 		users = append(users, member)
 	}
 
+	r.log.Debug("potential reviewers loaded",
+		zap.String("team_id", teamId),
+		zap.Int("members", len(users)),
+	)
 	// Ответ
 	return users, nil
 }
