@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
+	"math/rand"
+	"strings"
+	"time"
+
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
@@ -29,10 +32,10 @@ const (
 
 // Интерфейс репозитория
 type PrRepository interface {
-	Create(ctx context.Context, dto *dto.CreatPrDTO, prReviewers []*uuid.UUID) (*result.PrResult, error)
+	Create(ctx context.Context, dto *dto.CreatPrDTO, prReviewers []string) (*result.PrResult, error)
 	Merge(ctx context.Context, dto *dto.MergePrDTO) (*result.PrResult, error)
 	Reassign(ctx context.Context, dto *dto.ReassignPrDTO) (*result.ReassignResult, error)
-	SelectPotentialReviewers(ctx context.Context, userId uuid.UUID) ([]*domain.User, error)
+	SelectPotentialReviewers(ctx context.Context, userId string) ([]*domain.User, error)
 }
 
 // TODO добавить логирование
@@ -52,160 +55,151 @@ func NewPrService(repo PrRepository, log *zap.Logger) *PrService {
 }
 
 func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*response.CreateResponse, error) {
-	// Парсим автора
-	authorId, err := uuid.Parse(req.AuthorId)
+	authorId, err := normalizeID(req.AuthorId, "author_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
+		return nil, err
 	}
 
-	// Берем всех участников команды автора
+	// Читаем всех членов команды автора
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, authorId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
-	// Ищем активных ревьюеров и исключаем автора
-	reviewers, err := findReviewers(potentialReviewers, reviewerCountForCreate, authorId)
+	// Ищем до двух активных ревьюеров, исключая автора
+	reviewers, err := findReviewers(potentialReviewers, authorId, reviewerCountForCreate)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
-	// Парсим идентификатор PR
-	prId, err := uuid.Parse(req.PrId)
+	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
+		return nil, err
 	}
 
-	// Формируем DTO для репозитория
 	dto := &dto.CreatPrDTO{
 		PrId:     prId,
 		PrName:   req.PrName,
 		AuthorId: authorId,
 	}
 
-	// Создаем PR в базе
 	res, err := s.repo.Create(ctx, dto, reviewers)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
-	// Собираем ответ
+	// Готовим список назначенных ревьюеров для ответа
 	var assignedReviewers []string
 	for _, reviewer := range res.AssignedReviewers {
-		assignedReviewers = append(assignedReviewers, reviewer.String())
+		assignedReviewers = append(assignedReviewers, reviewer)
 	}
 
 	return &response.CreateResponse{
-		PrId:              res.Id.String(),
+		PrId:              res.Id,
 		PrName:            res.Name,
-		AuthorId:          res.AuthorId.String(),
+		AuthorId:          res.AuthorId,
 		Status:            res.Status,
 		AssignedReviewers: assignedReviewers,
-		CreatedAt:         formatTimeValue(res.CreatedAt),
+		CreatedAt:         formatTime(res.CreatedAt),
 		MergedAt:          formatTimePtr(res.MergedAt),
 	}, nil
 }
 
 func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*response.MergeResponse, error) {
-	// Парсим идентификатор PR
-	prId, err := uuid.Parse(req.PrId)
+	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
+		return nil, err
 	}
 
-	// Формируем DTO
 	dto := &dto.MergePrDTO{
 		PrId: prId,
 	}
 
-	// Обновляем статус PR
 	res, err := s.repo.Merge(ctx, dto)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", mergeError, err)
 	}
 
-	// Собираем список ревьюеров
+	// Готовим список ревьюеров
 	var assignedReviewers []string
 	for _, reviewer := range res.AssignedReviewers {
-		assignedReviewers = append(assignedReviewers, reviewer.String())
+		assignedReviewers = append(assignedReviewers, reviewer)
 	}
 
-	// Готовим ответ
 	return &response.MergeResponse{
-		PrId:              res.Id.String(),
+		PrId:              res.Id,
 		PrName:            res.Name,
-		AuthorId:          res.AuthorId.String(),
+		AuthorId:          res.AuthorId,
 		Status:            res.Status,
 		AssignedReviewers: assignedReviewers,
-		MergedAt:          res.MergedAt.String(),
+		CreatedAt:         formatTime(res.CreatedAt),
+		MergedAt:          formatTimePtr(res.MergedAt),
 	}, nil
 }
 
 func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) (*response.ReassignResponse, error) {
-	// Парсим идентификатор PR
-	prId, err := uuid.Parse(req.PrId)
+	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
+		return nil, err
 	}
 
-	// Парсим идентификатор заменяемого ревьюера
-	oldReviewerId, err := uuid.Parse(req.OldReviewerId)
+	// Парсим идентификатор старого ревьюера
+	oldReviewerId, err := normalizeID(req.OldReviewerId, "old_reviewer_id")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", incorrectIdError, err)
+		return nil, err
 	}
 
-	// Берем всех участников команды заменяемого ревьюера
+	// Читаем всех членов команды старого ревьюера
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, oldReviewerId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
-	// Ищем новую кандидатуру
-	newReviewer, err := findReviewers(potentialReviewers, reviewerCountForReassign, oldReviewerId)
+	// Ищем нового активного ревьюера, исключая старого
+	newReviewer, err := findReviewers(potentialReviewers, oldReviewerId, reviewerCountForReassign)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
-	newReviewerId := *newReviewer[0]
+	newReviewerId := newReviewer[0]
 
-	// Формируем DTO
+	// Собираем dto для репозитория
 	dto := &dto.ReassignPrDTO{
 		PrId:          prId,
 		OldReviewerId: oldReviewerId,
-		NewReviewerId: newReviewerId,
+		ReplacedBy:    newReviewerId,
 	}
 
-	// Проводим замену в базе
 	res, err := s.repo.Reassign(ctx, dto)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
-	// Собираем ответ
+	// Готовим список ревьюеров для ответа
 	var assignedReviewers []string
 	for _, reviewer := range res.Pr.AssignedReviewers {
-		assignedReviewers = append(assignedReviewers, reviewer.String())
+		assignedReviewers = append(assignedReviewers, reviewer)
 	}
 
 	return &response.ReassignResponse{
-		PrId:              res.Pr.Id.String(),
+		PrId:              res.Pr.Id,
 		PrName:            res.Pr.Name,
-		AuthorId:          res.Pr.AuthorId.String(),
+		AuthorId:          res.Pr.AuthorId,
 		Status:            res.Pr.Status,
 		AssignedReviewers: assignedReviewers,
-		ReplacedBy:        res.ReplacedBy.String(),
-		CreatedAt:         formatTimeValue(res.Pr.CreatedAt),
+		ReplacedBy:        res.ReplacedBy,
+		CreatedAt:         formatTime(res.Pr.CreatedAt),
 		MergedAt:          formatTimePtr(res.Pr.MergedAt),
 	}, nil
 }
 
-func findReviewers(potentialReviewers []*domain.User, authorId uuid.UUID, reviewerCount int) ([]*uuid.UUID, error) {
+func findReviewers(potentialReviewers []*domain.User, excludedId string, reviewerCount int) ([]string, error) {
 	var reviewers []*domain.User
 	for _, potentialReviewer := range potentialReviewers {
 		if potentialReviewer == nil {
 			continue
 		}
 
-		if potentialReviewer.Id == authorId {
+		if potentialReviewer.Id == excludedId {
 			continue
 		}
 
@@ -228,11 +222,30 @@ func findReviewers(potentialReviewers []*domain.User, authorId uuid.UUID, review
 		reviewerCount = len(reviewers)
 	}
 
-	result := make([]*uuid.UUID, 0, reviewerCount)
+	result := make([]string, 0, reviewerCount)
 	for i := 0; i < reviewerCount; i++ {
-		id := reviewers[i].Id
-		result = append(result, &id)
+		result = append(result, reviewers[i].Id)
 	}
 
 	return result, nil
+}
+
+func formatTime(t time.Time) string {
+	return t.UTC().Format(time.RFC3339)
+}
+
+func formatTimePtr(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	formatted := formatTime(*t)
+	return &formatted
+}
+
+func normalizeID(raw, field string) (string, error) {
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		return "", fmt.Errorf("%w: %s is empty", incorrectIdError, field)
+	}
+	return id, nil
 }

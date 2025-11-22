@@ -1,21 +1,18 @@
 package result
 
-import (
-	"github.com/google/uuid"
-	"time"
-)
+import "time"
 
 type ReassignResult struct {
 	Pr         *PrResult
-	ReplacedBy uuid.UUID
+	ReplacedBy string
 }
 
 type PrResult struct {
-	Id                uuid.UUID
+	Id                string
 	Name              string
-	AuthorId          uuid.UUID
+	AuthorId          string
 	Status            string
 	CreatedAt         time.Time
-	MergedAt          time.Time
-	AssignedReviewers []*uuid.UUID
+	MergedAt          *time.Time
+	AssignedReviewers []string
 }

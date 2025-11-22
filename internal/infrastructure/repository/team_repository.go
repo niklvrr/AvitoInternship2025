@@ -19,12 +19,13 @@ SELECT id FROM teams
 WHERE name = $1;`
 
 	insertUserQuery = `
-INSERT INTO users (id, name, is_active)
-VALUES ($1, $2, $3)
+INSERT INTO users (id, name, team_name, is_active)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (id) DO UPDATE
 	SET name = EXCLUDED.name,
+	    team_name = EXCLUDED.team_name,
 	    is_active = EXCLUDED.is_active
-RETURNING id, name, is_active, created_at;`
+RETURNING id, name, team_name, is_active, created_at;`
 
 	insertTeamQuery = `
 INSERT INTO teams (id, name) 
@@ -42,6 +43,7 @@ SELECT
     t.name        AS team_name,
     u.id          AS user_id,
     u.name        AS username,
+    u.team_name   AS user_team_name,
     u.is_active   AS user_is_active,
     u.created_at  AS user_created_at
 FROM teams t
@@ -69,7 +71,7 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 	defer tx.Rollback(ctx)
 
 	// Проверяем, существует ли уже команда с таким названием
-	var existingTeamId uuid.UUID
+	var existingTeamId string
 	err = tx.QueryRow(ctx, teamExistsQuery, d.TeamName).Scan(&existingTeamId)
 	if err == nil {
 		return nil, errAlreadyExists
@@ -79,13 +81,13 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 	}
 
 	var (
-		teamId    uuid.UUID
+		teamId    string
 		teamName  string
 		createdAt time.Time
 	)
 
 	// Создаем команду
-	newTeamId := uuid.New()
+	newTeamId := uuid.NewString()
 	err = tx.QueryRow(ctx, insertTeamQuery, newTeamId, d.TeamName).Scan(
 		&teamId,
 		&teamName,
@@ -100,10 +102,12 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 		if member == nil {
 			continue
 		}
+		member.TeamName = d.TeamName
 
-		err := tx.QueryRow(ctx, insertUserQuery, member.Id, member.Name, member.IsActive).Scan(
+		err := tx.QueryRow(ctx, insertUserQuery, member.Id, member.Name, member.TeamName, member.IsActive).Scan(
 			&member.Id,
 			&member.Name,
+			&member.TeamName,
 			&member.IsActive,
 			&member.CreatedAt,
 		)
@@ -143,6 +147,7 @@ func (r *TeamRepository) Get(ctx context.Context, d *dto.GetTeamDTO) (*result.Ge
 			&d.TeamName,
 			&member.Id,
 			&member.Name,
+			&member.TeamName,
 			&member.IsActive,
 			&member.CreatedAt,
 		)

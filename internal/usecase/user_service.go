@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
@@ -37,10 +36,10 @@ func NewUserService(repo UserRepository, log *zap.Logger) *UserService {
 }
 
 func (s *UserService) SetIsActive(ctx context.Context, req *request.SetIsActiveRequest) (*response.SetIsActiveResponse, error) {
-	// Парсим строковый id в uuid
-	userId, err := uuid.Parse(req.UserId)
+	// Проверяем корректность идентификатора
+	userId, err := normalizeID(req.UserId, "user_id")
 	if err != nil {
-		return nil, fmt.Errorf(`%w: %w`, incorrectIdError, err)
+		return nil, err
 	}
 
 	// Собираем dto
@@ -57,7 +56,7 @@ func (s *UserService) SetIsActive(ctx context.Context, req *request.SetIsActiveR
 
 	// Ответ
 	return &response.SetIsActiveResponse{
-		UserId:   userId.String(),
+		UserId:   userId,
 		Username: res.Name,
 		TeamName: res.TeamName,
 		IsActive: res.IsActive,
@@ -65,10 +64,10 @@ func (s *UserService) SetIsActive(ctx context.Context, req *request.SetIsActiveR
 }
 
 func (s *UserService) GetReview(ctx context.Context, req *request.GetReviewRequest) (*response.GetReviewResponse, error) {
-	// Парсим строковый id в uuid
-	userId, err := uuid.Parse(req.UserId)
+	// Проверяем корректность идентификатора
+	userId, err := normalizeID(req.UserId, "user_id")
 	if err != nil {
-		return nil, fmt.Errorf(`%w: %w`, incorrectIdError, err)
+		return nil, err
 	}
 
 	// Собираем dto
@@ -84,7 +83,7 @@ func (s *UserService) GetReview(ctx context.Context, req *request.GetReviewReque
 
 	// Ответ
 	return &response.GetReviewResponse{
-		UserId: userId.String(),
+		UserId: userId,
 		Prs:    res.Prs,
 	}, nil
 }
