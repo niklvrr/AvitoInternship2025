@@ -101,35 +101,20 @@ func (r *PrRepository) Merge(ctx context.Context, d *dto.MergePrDTO) (*result.Pr
 	}
 
 	// Чтение данных pr для ответа
-	result := &result.PrResult{}
-	err = r.db.QueryRow(ctx, selectPrQuery, d.PrId).Scan(
-		&result.Id,
-		&result.Name,
-		&result.AuthorId,
-		&result.Status,
-		&result.CreatedAt,
-		&result.AssignedReviewers)
-
-	// Чтение всех ревьюеров этого pr
-	rows, err := r.db.Query(ctx, selectPrReviewerQuery, d.PrId)
+	prRes, err := r.selectPr(ctx, d.PrId)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
-	defer rows.Close()
 
-	var prReviewers []*uuid.UUID
-	for rows.Next() {
-		var prReviewerId uuid.UUID
-		err = rows.Scan(&prReviewerId)
-		if err != nil {
-			return nil, handleDBError(err)
-		}
-		prReviewers = append(prReviewers, &prReviewerId)
+	// Чтение всех ревьюеров этого pr
+	prReviewers, err := r.selectReviewers(ctx, d.PrId)
+	if err != nil {
+		return nil, handleDBError(err)
 	}
-	result.AssignedReviewers = prReviewers
+	prRes.AssignedReviewers = prReviewers
 
 	// Ответ
-	return result, nil
+	return prRes, nil
 }
 
 func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*result.ReassignResult, error) {
@@ -149,30 +134,15 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 	}
 
 	// Чтение данных pr для ответа
-	prRes := &result.PrResult{}
-	err = r.db.QueryRow(ctx, selectPrQuery, d.PrId).Scan(
-		&prRes.Id,
-		&prRes.Name,
-		&prRes.AuthorId,
-		&prRes.Status,
-		&prRes.CreatedAt,
-		&prRes.AssignedReviewers)
-
-	// Чтение всех ревьюеров для этого pr
-	rows, err := r.db.Query(ctx, selectPrReviewerQuery, d.PrId)
+	prRes, err := r.selectPr(ctx, d.PrId)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
-	defer rows.Close()
 
-	var prReviewers []*uuid.UUID
-	for rows.Next() {
-		var prReviewerId uuid.UUID
-		err = rows.Scan(&prReviewerId)
-		if err != nil {
-			return nil, handleDBError(err)
-		}
-		prReviewers = append(prReviewers, &prReviewerId)
+	// Чтение всех ревьюеров для этого pr
+	prReviewers, err := r.selectReviewers(ctx, d.PrId)
+	if err != nil {
+		return nil, handleDBError(err)
 	}
 	prRes.AssignedReviewers = prReviewers
 
@@ -213,9 +183,9 @@ func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid
 }
 
 func (r *PrRepository) selectReviewers(ctx context.Context, prId uuid.UUID) ([]*uuid.UUID, error) {
-	rows, err := r.db.Query(ctx, selectPrReviewerQuery, d.PrId)
+	rows, err := r.db.Query(ctx, selectPrReviewerQuery, prId)
 	if err != nil {
-		return nil, handleDBError(err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -224,7 +194,7 @@ func (r *PrRepository) selectReviewers(ctx context.Context, prId uuid.UUID) ([]*
 		var prReviewerId uuid.UUID
 		err = rows.Scan(&prReviewerId)
 		if err != nil {
-			return nil, handleDBError(err)
+			return nil, err
 		}
 		prReviewers = append(prReviewers, &prReviewerId)
 	}
@@ -242,7 +212,7 @@ func (r *PrRepository) selectPr(ctx context.Context, prId uuid.UUID) (*result.Pr
 		&prRes.AssignedReviewers,
 	)
 	if err != nil {
-		return nil, handleDBError(err)
+		return nil, err
 	}
 
 	return prRes, nil
