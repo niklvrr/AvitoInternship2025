@@ -2,19 +2,21 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"time"
+
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
-	"time"
 )
 
 const (
 	teamExistsQuery = `
 SELECT id FROM teams
-WHERE name = $1
-RETURNING team_id;`
+WHERE name = $1;`
 
 	insertUserQuery = `
 INSERT INTO users (id, name, is_active)
@@ -33,8 +35,7 @@ RETURNING id, name, created_at;`
 INSERT INTO team_members (team_id, user_id)
 VALUES ($1, $2)
 ON CONFLICT (team_id, user_id) DO UPDATE
-	SET joined_at = EXCLUDED.joined_at
-RETURNING team_id, user_id, joined_at;`
+	SET joined_at = CURRENT_TIMESTAMP;`
 
 	getTeamQuery = `
 SELECT
@@ -42,7 +43,7 @@ SELECT
     u.id          AS user_id,
     u.name        AS username,
     u.is_active   AS user_is_active,
-    u.created_at  AS user_created_at,
+    u.created_at  AS user_created_at
 FROM teams t
 LEFT JOIN team_members tm ON tm.team_id = t.id
 LEFT JOIN users u ON u.id = tm.user_id
@@ -61,21 +62,46 @@ func NewTeamRepository(db *pgxpool.Pool) *TeamRepository {
 }
 
 func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.AddTeamResult, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Проверяем, существует ли уже команда с таким названием
+	var existingTeamId uuid.UUID
+	err = tx.QueryRow(ctx, teamExistsQuery, d.TeamName).Scan(&existingTeamId)
+	if err == nil {
+		return nil, errAlreadyExists
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, handleDBError(err)
+	}
+
 	var (
-		teamId     uuid.UUID
-		teamName   string
-		created_at time.Time
+		teamId    uuid.UUID
+		teamName  string
+		createdAt time.Time
 	)
 
-	// Проверяем, существует ли уже команда с таким навзанием
-	err := r.db.QueryRow(ctx, insertTeamQuery, d.TeamName).Scan(&teamId)
+	// Создаем команду
+	newTeamId := uuid.New()
+	err = tx.QueryRow(ctx, insertTeamQuery, newTeamId, d.TeamName).Scan(
+		&teamId,
+		&teamName,
+		&createdAt,
+	)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
 
 	// Добавляем пользователей или обновляем данные колонок, если такие уже существуют
 	for _, member := range d.Members {
-		err := r.db.QueryRow(ctx, insertUserQuery, member.Id).Scan(
+		if member == nil {
+			continue
+		}
+
+		err := tx.QueryRow(ctx, insertUserQuery, member.Id, member.Name, member.IsActive).Scan(
 			&member.Id,
 			&member.Name,
 			&member.IsActive,
@@ -84,30 +110,15 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 		if err != nil {
 			return nil, handleDBError(err)
 		}
+
+		// Добавляем пользователя в команду
+		if _, err = tx.Exec(ctx, insertTeamMemberQuery, teamId, member.Id); err != nil {
+			return nil, handleDBError(err)
+		}
 	}
 
-	// Создаем команду
-	err = r.db.QueryRow(ctx, insertTeamQuery, d.TeamName).Scan(
-		&teamId,
-		&teamName,
-		&created_at,
-	)
-	if err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return nil, handleDBError(err)
-	}
-
-	// Добавляем в таблицу членов команды
-	for _, member := range d.Members {
-		err := r.db.QueryRow(ctx, insertTeamMemberQuery, teamId, member.Id).Scan(
-			&teamName,
-			&member.Id,
-			&member.Name,
-			&member.IsActive,
-			&member.CreatedAt,
-		)
-		if err != nil {
-			return nil, handleDBError(err)
-		}
 	}
 
 	// Ответ
