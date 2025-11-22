@@ -8,6 +8,7 @@ import (
 type User struct {
 	Id        uuid.UUID
 	Name      string
+	TeamName  string
 	IsActive  bool
 	CreatedAt time.Time
 }
