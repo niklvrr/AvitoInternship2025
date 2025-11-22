@@ -15,6 +15,5 @@ type MergePrDTO struct {
 type ReassignPrDTO struct {
 	PrId          uuid.UUID
 	OldReviewerId uuid.UUID
-	NewReviewerId uuid.UUID
 	ReplacedBy    uuid.UUID
 }

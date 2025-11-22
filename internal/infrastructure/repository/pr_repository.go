@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -21,7 +22,7 @@ SELECT team_id FROM team_members
 WHERE user_id = $1;`
 
 	selectTeamMembersQuery = `
-SELECT user_id FROM team_members
+SELECT user_id, is_active FROM team_members
 WHERE team_id = $1;`
 
 	insertPrReviewerQuery = `
@@ -195,7 +196,7 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 }
 
 // вспомогательная функция для поиска возможных ревьюеров, вызывается в сервисном слое для выбора ревьеров для pr
-func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid.UUID) ([]*uuid.UUID, error) {
+func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid.UUID) ([]*domain.User, error) {
 	// Чтение команды пользователя
 	var teamId uuid.UUID
 	err := r.db.QueryRow(ctx, selectTeamQuery, userId).Scan(&teamId)
@@ -210,14 +211,17 @@ func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid
 	}
 	defer rows.Close()
 
-	var users []*uuid.UUID
+	var users []*domain.User
 	for rows.Next() {
-		var userId uuid.UUID
-		err = rows.Scan(&userId)
+		user := &domain.User{}
+		err = rows.Scan(
+			&userId,
+			&user.IsActive,
+		)
 		if err != nil {
 			return nil, handleDBError(err)
 		}
-		users = append(users, &userId)
+		users = append(users, user)
 	}
 
 	// Ответ
