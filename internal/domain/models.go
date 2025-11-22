@@ -32,14 +32,13 @@ var (
 )
 
 type Pr struct {
-	Id          uuid.UUID
-	Title       string
-	Description string
-	AuthorId    uuid.UUID
-	TeamId      uuid.UUID
-	Status      PrStatus
-	CreatedAt   time.Time
-	MergedAt    time.Time
+	Id        uuid.UUID
+	Name      string
+	AuthorId  uuid.UUID
+	TeamId    uuid.UUID
+	Status    PrStatus
+	CreatedAt time.Time
+	MergedAt  time.Time
 }
 
 type PrReviewer struct {

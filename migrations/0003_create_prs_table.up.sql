@@ -2,8 +2,7 @@ CREATE TYPE pr_status AS ENUM ('OPEN', 'MERGED');
 
 CREATE TABLE prs (
     id UUID PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    description TEXT,
+    name VARCHAR(255) NOT NULL,
     author_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     team_id UUID NOT NULL REFERENCES teams(id) ON DELETE RESTRICT,
     status pr_status NOT NULL DEFAULT 'OPEN',
