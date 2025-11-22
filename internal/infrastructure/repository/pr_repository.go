@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
@@ -25,24 +26,26 @@ SELECT user_id FROM team_members
 WHERE team_id = $1;`
 
 	insertPrReviewerQuery = `
-INSERT INTO team_members(user_id, pr_id)
-VALUES ($1, $2);`
+INSERT INTO pr_reviewers(user_id, pr_id)
+VALUES ($1, $2)
+ON CONFLICT (user_id, pr_id) DO NOTHING;`
 
-	mergePrReviewerQuery = `
+	mergePrQuery = `
 UPDATE prs
-SET status = 'MERGED'
-WHERE id = $1;`
+SET status = 'MERGED',
+    merged_at = CURRENT_TIMESTAMP
+WHERE id = $1 AND status <> 'MERGED';`
 
 	deletePrReviewerQuery = `
-DELETE FROM pr_members
-WHERE user_id = $1;`
+DELETE FROM pr_reviewers
+WHERE pr_id = $1 AND user_id = $2;`
 
 	selectPrReviewerQuery = `
 SELECT user_id FROM pr_reviewers
 WHERE pr_id = $1;`
 
 	selectPrQuery = `
-SELECT * FROM prs
+SELECT id, name, author_id, status, created_at, merged_at FROM prs
 WHERE id = $1;`
 )
 
@@ -55,72 +58,113 @@ func NewPrRepository(db *pgxpool.Pool) *PrRepository {
 }
 
 func (r *PrRepository) Create(ctx context.Context, d *dto.CreatPrDTO, prReviewers []*uuid.UUID) (*result.PrResult, error) {
-	var (
-		prStatus  string
-		createdAt time.Time
-	)
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	prRes := &result.PrResult{}
 
 	// Создание pr
-	err := r.db.QueryRow(ctx, insertPrReviewerQuery, d.PrId, d.PrName, d.AuthorId).Scan(
-		&d.PrId,
-		&d.PrName,
-		&d.AuthorId,
-		&prStatus,
-		&createdAt)
+	err = tx.QueryRow(ctx, insertPrQuery, d.PrId, d.PrName, d.AuthorId).Scan(
+		&prRes.Id,
+		&prRes.Name,
+		&prRes.AuthorId,
+		&prRes.Status,
+		&prRes.CreatedAt,
+		&prRes.MergedAt,
+	)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
 
+	assignedReviewers := make([]*uuid.UUID, 0, len(prReviewers))
 	// Создание pr reviewers
 	for _, prMemberId := range prReviewers {
-		err := r.db.QueryRow(ctx, insertPrReviewerQuery, prMemberId, d.PrId).Scan(&d.PrId)
-		if err != nil {
+		if prMemberId == nil {
+			continue
+		}
+		if _, err := tx.Exec(ctx, insertPrReviewerQuery, prMemberId, prRes.Id); err != nil {
 			return nil, handleDBError(err)
 		}
+		assignedReviewers = append(assignedReviewers, prMemberId)
 	}
 
+	if err := tx.Commit(ctx); err != nil {
+		return nil, handleDBError(err)
+	}
+
+	prRes.AssignedReviewers = assignedReviewers
+
 	// Ответ
-	return &result.PrResult{
-		Id:                d.PrId,
-		Name:              d.PrName,
-		AuthorId:          d.AuthorId,
-		Status:            prStatus,
-		CreatedAt:         createdAt,
-		AssignedReviewers: prReviewers,
-	}, nil
+	return prRes, nil
 }
 
 func (r *PrRepository) Merge(ctx context.Context, d *dto.MergePrDTO) (*result.PrResult, error) {
-	// Изменение статуса pr на 'MERGE'
-	cmdTag, err := r.db.Exec(ctx, mergePrReviewerQuery, d.PrId)
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Получаем текущее состояние pr
+	prRes, err := readPr(ctx, tx, d.PrId)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
 
-	if cmdTag.RowsAffected() == 0 {
-		return nil, errNotFound
-	}
+	// Меняем статус, если PR еще не merged
+	if prRes.Status != "MERGED" {
+		cmdTag, err := tx.Exec(ctx, mergePrQuery, d.PrId)
+		if err != nil {
+			return nil, handleDBError(err)
+		}
 
-	// Чтение данных pr для ответа
-	prRes, err := r.selectPr(ctx, d.PrId)
-	if err != nil {
-		return nil, handleDBError(err)
+		if cmdTag.RowsAffected() == 0 {
+			// PR уже в состоянии MERGED, перечитываем состояние
+			prRes, err = readPr(ctx, tx, d.PrId)
+			if err != nil {
+				return nil, handleDBError(err)
+			}
+		} else {
+			prRes, err = readPr(ctx, tx, d.PrId)
+			if err != nil {
+				return nil, handleDBError(err)
+			}
+		}
 	}
 
 	// Чтение всех ревьюеров этого pr
-	prReviewers, err := r.selectReviewers(ctx, d.PrId)
+	prReviewers, err := readReviewers(ctx, tx, d.PrId)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
 	prRes.AssignedReviewers = prReviewers
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, handleDBError(err)
+	}
 
 	// Ответ
 	return prRes, nil
 }
 
 func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*result.ReassignResult, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Убедимся, что PR существует
+	prRes, err := readPr(ctx, tx, d.PrId)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+
 	// Удалить старого ревьюера из таблицы pr_reviewers
-	cmdTag, err := r.db.Exec(ctx, deletePrReviewerQuery, d.OldReviewerId)
+	cmdTag, err := tx.Exec(ctx, deletePrReviewerQuery, d.PrId, d.OldReviewerId)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
@@ -128,24 +172,21 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 		return nil, errNotFound
 	}
 
-	// Добавить в таблицу pr_reviewers нового ревьюера
-	err = r.db.QueryRow(ctx, insertPrReviewerQuery, d.NewReviewerId, d.PrId).Scan()
-	if err != nil {
-		return nil, handleDBError(err)
-	}
-
-	// Чтение данных pr для ответа
-	prRes, err := r.selectPr(ctx, d.PrId)
-	if err != nil {
+	// Добавить нового ревьюера
+	if _, err := tx.Exec(ctx, insertPrReviewerQuery, d.NewReviewerId, d.PrId); err != nil {
 		return nil, handleDBError(err)
 	}
 
 	// Чтение всех ревьюеров для этого pr
-	prReviewers, err := r.selectReviewers(ctx, d.PrId)
+	prReviewers, err := readReviewers(ctx, tx, d.PrId)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
 	prRes.AssignedReviewers = prReviewers
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, handleDBError(err)
+	}
 
 	// Ответ
 	return &result.ReassignResult{
@@ -184,9 +225,14 @@ func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid
 	return users, nil
 }
 
-// вспомогательная функция для чтения всез ревьюеров для pr
-func (r *PrRepository) selectReviewers(ctx context.Context, prId uuid.UUID) ([]*uuid.UUID, error) {
-	rows, err := r.db.Query(ctx, selectPrReviewerQuery, prId)
+type queryExecutor interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// вспомогательная функция для чтения всех ревьюеров для pr
+func readReviewers(ctx context.Context, exec queryExecutor, prId uuid.UUID) ([]*uuid.UUID, error) {
+	rows, err := exec.Query(ctx, selectPrReviewerQuery, prId)
 	if err != nil {
 		return nil, err
 	}
@@ -195,25 +241,25 @@ func (r *PrRepository) selectReviewers(ctx context.Context, prId uuid.UUID) ([]*
 	var prReviewers []*uuid.UUID
 	for rows.Next() {
 		var prReviewerId uuid.UUID
-		err = rows.Scan(&prReviewerId)
-		if err != nil {
+		if err = rows.Scan(&prReviewerId); err != nil {
 			return nil, err
 		}
-		prReviewers = append(prReviewers, &prReviewerId)
+		prReviewer := prReviewerId
+		prReviewers = append(prReviewers, &prReviewer)
 	}
 	return prReviewers, nil
 }
 
 // вспомогательная функция для чтения данных для pr
-func (r *PrRepository) selectPr(ctx context.Context, prId uuid.UUID) (*result.PrResult, error) {
+func readPr(ctx context.Context, exec queryExecutor, prId uuid.UUID) (*result.PrResult, error) {
 	prRes := &result.PrResult{}
-	err := r.db.QueryRow(ctx, selectPrQuery, prId).Scan(
+	err := exec.QueryRow(ctx, selectPrQuery, prId).Scan(
 		&prRes.Id,
 		&prRes.Name,
 		&prRes.AuthorId,
 		&prRes.Status,
 		&prRes.CreatedAt,
-		&prRes.AssignedReviewers,
+		&prRes.MergedAt,
 	)
 	if err != nil {
 		return nil, err
