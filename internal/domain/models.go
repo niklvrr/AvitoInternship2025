@@ -24,22 +24,21 @@ type TeamMember struct {
 	JoinedAt time.Time
 }
 
-type PrStatus string
-
-var (
-	Open   PrStatus = "open"
-	Merged PrStatus = "merged"
-)
+//type PrStatus string
+//
+//var (
+//	Open   PrStatus = "open"
+//	Merged PrStatus = "merged"
+//)
 
 type Pr struct {
-	Id          uuid.UUID
-	Title       string
-	Description string
-	AuthorId    uuid.UUID
-	TeamId      uuid.UUID
-	Status      PrStatus
-	CreatedAt   time.Time
-	MergedAt    time.Time
+	Id        uuid.UUID
+	Name      string
+	AuthorId  uuid.UUID
+	TeamId    uuid.UUID
+	Status    string
+	CreatedAt time.Time
+	MergedAt  time.Time
 }
 
 type PrReviewer struct {
