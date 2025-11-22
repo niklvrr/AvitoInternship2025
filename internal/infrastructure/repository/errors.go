@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("resource not found")
-	ErrAlreadyExists = errors.New("resource already exists")
-	ErrInvalidInput  = errors.New("invalid input")
+	errNotFound      = errors.New("resource not found")
+	errAlreadyExists = errors.New("resource already exists")
+	errInvalidInput  = errors.New("invalid input")
 )
 
 func handleDBError(err error) error {
@@ -18,15 +18,15 @@ func handleDBError(err error) error {
 		return nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
+		return errNotFound
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case "23505":
-			return ErrAlreadyExists
+			return errAlreadyExists
 		case "23503", "23502", "23514":
-			return ErrInvalidInput
+			return errInvalidInput
 		}
 	}
 	return err

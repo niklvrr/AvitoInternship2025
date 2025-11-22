@@ -4,16 +4,16 @@ import (
 	"context"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
+	"time"
 )
 
 const (
 	insertPrQuery = `
 INSERT INTO prs(id, name, author_id)
 VALUES ($1, $2, $3)
-RETURNING id;`
+RETURNING id, name, author_id, status, created_at, merged_at;`
 
 	selectTeamQuery = `
 SELECT team_id FROM team_members
@@ -23,18 +23,26 @@ WHERE user_id = $1;`
 SELECT user_id FROM team_members
 WHERE team_id = $1;`
 
-	insertPrMemberQuery = `
+	insertPrReviewerQuery = `
 INSERT INTO team_members(user_id, pr_id)
 VALUES ($1, $2);`
 
-	mergePrMemberQuery = `
+	mergePrReviewerQuery = `
 UPDATE prs
 SET status = 'MERGED'
 WHERE id = $1;`
 
-	deletePrMemberQuery = `
+	deletePrReviewerQuery = `
 DELETE FROM pr_members
 WHERE user_id = $1;`
+
+	selectPrReviewerQuery = `
+SELECT user_id FROM pr_reviewers
+WHERE pr_id = $1;`
+
+	selectPrQuery = `
+SELECT * FROM prs
+WHERE id = $1;`
 )
 
 type PrRepository struct {
@@ -45,36 +53,145 @@ func NewPrRepository(db *pgxpool.Pool) *PrRepository {
 	return &PrRepository{db: db}
 }
 
-func (r *PrRepository) Create(ctx context.Context, d *dto.CreatPrDTO, prMembers []*uuid.UUID) (*domain.Pr, error) {
-	var prId uuid.UUID
-	err := r.db.QueryRow(ctx, insertPrMemberQuery, d.PrId, d.PrName, d.AuthorId).Scan(&prId)
+func (r *PrRepository) Create(ctx context.Context, d *dto.CreatPrDTO, prReviewers []*uuid.UUID) (*result.PrResult, error) {
+	var (
+		prStatus  string
+		createdAt time.Time
+	)
+
+	// Создание pr
+	err := r.db.QueryRow(ctx, insertPrReviewerQuery, d.PrId, d.PrName, d.AuthorId).Scan(
+		&d.PrId,
+		&d.PrName,
+		&d.AuthorId,
+		&prStatus,
+		&createdAt)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
 
-	for _, prMemberId := range prMembers {
-		err := r.db.QueryRow(ctx, insertPrMemberQuery, prMemberId, prId)
+	// Создание pr reviewers
+	for _, prMemberId := range prReviewers {
+		err := r.db.QueryRow(ctx, insertPrReviewerQuery, prMemberId, d.PrId).Scan(&d.PrId)
 		if err != nil {
-			return
+			return nil, handleDBError(err)
 		}
 	}
+
+	// Ответ
+	return &result.PrResult{
+		Id:                d.PrId,
+		Name:              d.PrName,
+		AuthorId:          d.AuthorId,
+		Status:            prStatus,
+		CreatedAt:         createdAt,
+		AssignedReviewers: prReviewers,
+	}, nil
 }
 
-func (r *PrRepository) Merge(ctx context.Context, d *dto.MergePrDTO) (*domain.Pr, error) {
+func (r *PrRepository) Merge(ctx context.Context, d *dto.MergePrDTO) (*result.PrResult, error) {
+	// Изменение статуса pr на 'MERGE'
+	cmdTag, err := r.db.Exec(ctx, mergePrReviewerQuery, d.PrId)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
 
+	if cmdTag.RowsAffected() == 0 {
+		return nil, errNotFound
+	}
+
+	// Чтение данных pr для ответа
+	result := &result.PrResult{}
+	err = r.db.QueryRow(ctx, selectPrQuery, d.PrId).Scan(
+		&result.Id,
+		&result.Name,
+		&result.AuthorId,
+		&result.Status,
+		&result.CreatedAt,
+		&result.AssignedReviewers)
+
+	// Чтение всех ревьюеров этого pr
+	rows, err := r.db.Query(ctx, selectPrReviewerQuery, d.PrId)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+	defer rows.Close()
+
+	var prReviewers []*uuid.UUID
+	for rows.Next() {
+		var prReviewerId uuid.UUID
+		err = rows.Scan(&prReviewerId)
+		if err != nil {
+			return nil, handleDBError(err)
+		}
+		prReviewers = append(prReviewers, &prReviewerId)
+	}
+	result.AssignedReviewers = prReviewers
+
+	// Ответ
+	return result, nil
 }
 
 func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*result.ReassignResult, error) {
+	// Удалить старого ревьюера из таблицы pr_reviewers
+	cmdTag, err := r.db.Exec(ctx, deletePrReviewerQuery, d.OldReviewerId)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return nil, errNotFound
+	}
 
+	// Добавить в таблицу pr_reviewers нового ревьюера
+	err = r.db.QueryRow(ctx, insertPrReviewerQuery, d.NewReviewerId, d.PrId).Scan()
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+
+	// Чтение данных pr для ответа
+	prRes := &result.PrResult{}
+	err = r.db.QueryRow(ctx, selectPrQuery, d.PrId).Scan(
+		&prRes.Id,
+		&prRes.Name,
+		&prRes.AuthorId,
+		&prRes.Status,
+		&prRes.CreatedAt,
+		&prRes.AssignedReviewers)
+
+	// Чтение всех ревьюеров для этого pr
+	rows, err := r.db.Query(ctx, selectPrReviewerQuery, d.PrId)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+	defer rows.Close()
+
+	var prReviewers []*uuid.UUID
+	for rows.Next() {
+		var prReviewerId uuid.UUID
+		err = rows.Scan(&prReviewerId)
+		if err != nil {
+			return nil, handleDBError(err)
+		}
+		prReviewers = append(prReviewers, &prReviewerId)
+	}
+	prRes.AssignedReviewers = prReviewers
+
+	// Ответ
+	return &result.ReassignResult{
+		Pr:         prRes,
+		ReplacedBy: d.ReplacedBy,
+	}, nil
 }
 
 func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid.UUID) ([]*uuid.UUID, error) {
+	// Чтение команды пользователя
 	var teamId uuid.UUID
 	err := r.db.QueryRow(ctx, selectTeamQuery, userId).Scan(&teamId)
 	if err != nil {
 		return nil, handleDBError(err)
 	}
 
+	// Чтение всех участников команды
 	rows, err := r.db.Query(ctx, selectTeamMembersQuery, teamId)
 	if err != nil {
 		return nil, handleDBError(err)
@@ -91,5 +208,42 @@ func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid
 		users = append(users, &userId)
 	}
 
+	// Ответ
 	return users, nil
+}
+
+func (r *PrRepository) selectReviewers(ctx context.Context, prId uuid.UUID) ([]*uuid.UUID, error) {
+	rows, err := r.db.Query(ctx, selectPrReviewerQuery, d.PrId)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+	defer rows.Close()
+
+	var prReviewers []*uuid.UUID
+	for rows.Next() {
+		var prReviewerId uuid.UUID
+		err = rows.Scan(&prReviewerId)
+		if err != nil {
+			return nil, handleDBError(err)
+		}
+		prReviewers = append(prReviewers, &prReviewerId)
+	}
+	return prReviewers, nil
+}
+
+func (r *PrRepository) selectPr(ctx context.Context, prId uuid.UUID) (*result.PrResult, error) {
+	prRes := &result.PrResult{}
+	err := r.db.QueryRow(ctx, selectPrQuery, prId).Scan(
+		&prRes.Id,
+		&prRes.Name,
+		&prRes.AuthorId,
+		&prRes.Status,
+		&prRes.CreatedAt,
+		&prRes.AssignedReviewers,
+	)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+
+	return prRes, nil
 }

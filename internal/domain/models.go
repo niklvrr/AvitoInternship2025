@@ -24,19 +24,19 @@ type TeamMember struct {
 	JoinedAt time.Time
 }
 
-type PrStatus string
-
-var (
-	Open   PrStatus = "open"
-	Merged PrStatus = "merged"
-)
+//type PrStatus string
+//
+//var (
+//	Open   PrStatus = "open"
+//	Merged PrStatus = "merged"
+//)
 
 type Pr struct {
 	Id        uuid.UUID
 	Name      string
 	AuthorId  uuid.UUID
 	TeamId    uuid.UUID
-	Status    PrStatus
+	Status    string
 	CreatedAt time.Time
 	MergedAt  time.Time
 }
