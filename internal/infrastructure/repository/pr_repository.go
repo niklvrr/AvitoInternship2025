@@ -47,6 +47,10 @@ WHERE pr_id = $1;`
 	selectPrQuery = `
 SELECT id, name, author_id, status, created_at, merged_at FROM prs
 WHERE id = $1;`
+
+	selectAuthorQuery = `
+SELECT author_id, FROM authors
+WHERE id = $1;`
 )
 
 type PrRepository struct {
@@ -173,7 +177,7 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 	}
 
 	// Добавить нового ревьюера
-	if _, err := tx.Exec(ctx, insertPrReviewerQuery, d.NewReviewerId, d.PrId); err != nil {
+	if _, err := tx.Exec(ctx, insertPrReviewerQuery, d.ReplacedBy, d.PrId); err != nil {
 		return nil, handleDBError(err)
 	}
 
@@ -226,6 +230,16 @@ func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid
 
 	// Ответ
 	return users, nil
+}
+
+// вспомогательная функция для чтения author_id для pr
+func (r *PrRepository) SelectAuthorOfPr(ctx context.Context, prId uuid.UUID) (*uuid.UUID, error) {
+	var authorId uuid.UUID
+	err := r.db.QueryRow(ctx, selectAuthorQuery, prId).Scan(&authorId)
+	if err != nil {
+		return nil, handleDBError(err)
+	}
+	return &authorId, nil
 }
 
 type queryExecutor interface {

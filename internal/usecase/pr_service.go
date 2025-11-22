@@ -33,12 +33,14 @@ type PrRepository interface {
 	Merge(ctx context.Context, dto *dto.MergePrDTO) (*result.PrResult, error)
 	Reassign(ctx context.Context, dto *dto.ReassignPrDTO) (*result.ReassignResult, error)
 	SelectPotentialReviewers(ctx context.Context, userId uuid.UUID) ([]*domain.User, error)
+	SelectAuthorOfPr(ctx context.Context, prId uuid.UUID) (*uuid.UUID, error)
 }
 
 // TODO добавить логирование
-// TODO добавить комментарии
 // TODO сделать pull в develop
+// TODO изменить тип id с uuid на string
 
+// Интерфейс репозитория
 type PrService struct {
 	repo PrRepository
 	log  *zap.Logger
@@ -57,12 +59,14 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 		return nil, fmt.Errorf("%w: %w", incorrectId, err)
 	}
 
+	// Запрос в бд для чтения всех возможных ревьюеров
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, authorId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
-	reviewers, err := findReviewers(potentialReviewers, authorId, reviewerCountForCreate)
+	// Находим до 2 ревьюеров с is_active=true, если ревьюеров нет возращаем ошибку
+	reviewers, err := findReviewers(potentialReviewers, reviewerCountForCreate, authorId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
@@ -72,12 +76,14 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 		return nil, fmt.Errorf("%w: %w", incorrectId, err)
 	}
 
+	// Собираем dto
 	dto := &dto.CreatPrDTO{
 		PrId:     prId,
 		PrName:   req.PrName,
 		AuthorId: authorId,
 	}
 
+	// Запрос в бд для создания pull request
 	res, err := s.repo.Create(ctx, dto, reviewers)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", createError, err)
@@ -88,6 +94,7 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 		assignedReviewers = append(assignedReviewers, reviewer.String())
 	}
 
+	// Ответ
 	return &response.CreateResponse{
 		PrId:              res.Id.String(),
 		PrName:            res.Name,
@@ -103,10 +110,12 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 		return nil, fmt.Errorf("%w: %w", incorrectId, err)
 	}
 
+	// Собираем dto
 	dto := &dto.MergePrDTO{
 		PrId: prId,
 	}
 
+	// Запрос в бд для изменения статуса pr
 	res, err := s.repo.Merge(ctx, dto)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", mergeError, err)
@@ -117,6 +126,7 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 		assignedReviewers = append(assignedReviewers, reviewer.String())
 	}
 
+	// Ответ
 	return &response.MergeResponse{
 		PrId:              res.Id.String(),
 		PrName:            res.Name,
@@ -132,12 +142,20 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		return nil, fmt.Errorf("%w: %w", incorrectId, err)
 	}
 
+	// Запрос в бд для чтения всех возможных ревьюеров
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, prId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
-	newReviewer, err := findReviewers(potentialReviewers, prId, reviewerCountForReassign)
+	// Запрос в бд для чтения author_id для pr
+	authorId, err := s.repo.SelectAuthorOfPr(ctx, prId)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
+	}
+
+	// Находим 1 ревьюера с is_active=true, если ревьюеров нет возращаем ошибку
+	newReviewer, err := findReviewers(potentialReviewers, reviewerCountForReassign, *authorId, prId)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
@@ -148,12 +166,14 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		return nil, fmt.Errorf("%w: %w", incorrectId, err)
 	}
 
+	// Собираем dto
 	dto := &dto.ReassignPrDTO{
 		PrId:          prId,
 		OldReviewerId: oldReviewerId,
 		ReplacedBy:    newReviewerId,
 	}
 
+	// Запрос в бд для переназначения
 	res, err := s.repo.Reassign(ctx, dto)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
@@ -164,6 +184,7 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		assignedReviewers = append(assignedReviewers, reviewer.String())
 	}
 
+	// Ответ
 	return &response.ReassignResponse{
 		PrId:              res.Pr.Id.String(),
 		PrName:            res.Pr.Name,
@@ -174,36 +195,51 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 	}, nil
 }
 
-func findReviewers(potentialReviewers []*domain.User, authorId uuid.UUID, reviewerCount int) ([]*uuid.UUID, error) {
+// вспомогательная функция поиска подходящих ревьюеров
+func findReviewers(potentialReviewers []*domain.User, reviewerCount int, ids ...uuid.UUID) ([]*uuid.UUID, error) {
 	var reviewers []*domain.User
 	for _, potentialReviewer := range potentialReviewers {
 		if potentialReviewer == nil {
 			continue
 		}
 
-		if potentialReviewer.Id == authorId {
+		// Фильтруем ревьеров по id (например на случай, если reviewer_id=author_id)
+		flag := false
+		for _, id := range ids {
+			if id == potentialReviewer.Id {
+				flag = true
+				break
+			}
+		}
+		if flag {
 			continue
 		}
 
+		// Фильтуем по is_active
 		if potentialReviewer.IsActive == false {
 			continue
 		}
 
+		// Если ревьюер подходит по всем учловиям то добавляем
 		reviewers = append(reviewers, potentialReviewer)
 	}
 
+	// Если ревьюеров нет возращаем ошибку
 	if len(reviewers) == 0 {
 		return nil, noPotentialReviewerError
 	}
 
+	// Случайно перемешиваем слайс ревьюеров
 	rand.New(rand.NewSource(time.Now().UnixNano())).Shuffle(len(reviewers), func(i, j int) {
 		reviewers[i], reviewers[j] = reviewers[j], reviewers[i]
 	})
 
+	// меняем reviewerCount, если осталось меньше
 	if len(reviewers) < reviewerCount {
 		reviewerCount = len(reviewers)
 	}
 
+	// отбираем первых reviewerCount ревьюеров
 	result := make([]*uuid.UUID, 0, reviewerCount)
 	for i := 0; i < reviewerCount; i++ {
 		id := reviewers[i].Id
