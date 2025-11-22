@@ -153,6 +153,7 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 	}, nil
 }
 
+// вспомогательная функция для поиска возможных ревьюеров, вызывается в сервисном слое для выбора ревьеров для pr
 func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid.UUID) ([]*uuid.UUID, error) {
 	// Чтение команды пользователя
 	var teamId uuid.UUID
@@ -182,6 +183,7 @@ func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId uuid
 	return users, nil
 }
 
+// вспомогательная функция для чтения всез ревьюеров для pr
 func (r *PrRepository) selectReviewers(ctx context.Context, prId uuid.UUID) ([]*uuid.UUID, error) {
 	rows, err := r.db.Query(ctx, selectPrReviewerQuery, prId)
 	if err != nil {
@@ -201,6 +203,7 @@ func (r *PrRepository) selectReviewers(ctx context.Context, prId uuid.UUID) ([]*
 	return prReviewers, nil
 }
 
+// вспомогательная функция для чтения данных для pr
 func (r *PrRepository) selectPr(ctx context.Context, prId uuid.UUID) (*result.PrResult, error) {
 	prRes := &result.PrResult{}
 	err := r.db.QueryRow(ctx, selectPrQuery, prId).Scan(
