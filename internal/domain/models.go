@@ -24,18 +24,10 @@ type TeamMember struct {
 	JoinedAt time.Time
 }
 
-//type PrStatus string
-//
-//var (
-//	Open   PrStatus = "open"
-//	Merged PrStatus = "merged"
-//)
-
 type Pr struct {
 	Id        uuid.UUID
 	Name      string
 	AuthorId  uuid.UUID
-	TeamId    uuid.UUID
 	Status    string
 	CreatedAt time.Time
 	MergedAt  time.Time
@@ -44,6 +36,5 @@ type Pr struct {
 type PrReviewer struct {
 	UserId     uuid.UUID
 	PrId       uuid.UUID
-	AssignedBy uuid.UUID
 	AssignedAt time.Time
 }
