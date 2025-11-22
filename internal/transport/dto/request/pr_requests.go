@@ -11,6 +11,6 @@ type MergeRequest struct {
 }
 
 type ReassignRequest struct {
-	PrId          string `json:"pull_request_id"`
-	OldReviewerId string `json:"old_reviewer_id"`
+	PrId      string `json:"pull_request_id"`
+	OldUserId string `json:"old_user_id"`
 }

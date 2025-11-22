@@ -169,20 +169,20 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 	}
 
 	// Парсим идентификатор старого ревьюера
-	oldReviewerId, err := normalizeID(req.OldReviewerId, "old_reviewer_id")
+	oldReviewerId, err := normalizeID(req.OldUserId, "old_user_id")
 	if err != nil {
 		return nil, err
 	}
 	s.log.Info("reassign reviewer request accepted",
 		zap.String("pr_id", prId),
-		zap.String("old_reviewer_id", oldReviewerId),
+		zap.String("old_user_id", oldReviewerId),
 	)
 
 	// Читаем всех членов команды старого ревьюера
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, oldReviewerId)
 	if err != nil {
 		s.log.Error("failed to load team members for reassign",
-			zap.String("old_reviewer_id", oldReviewerId),
+			zap.String("old_user_id", oldReviewerId),
 			zap.Error(err),
 		)
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
@@ -193,7 +193,7 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 	if err != nil {
 		s.log.Warn("no replacement reviewer available",
 			zap.String("pr_id", prId),
-			zap.String("old_reviewer_id", oldReviewerId),
+			zap.String("old_user_id", oldReviewerId),
 			zap.Error(err),
 		)
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
@@ -211,7 +211,7 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 	if err != nil {
 		s.log.Error("failed to reassign reviewer",
 			zap.String("pr_id", prId),
-			zap.String("old_reviewer_id", oldReviewerId),
+			zap.String("old_user_id", oldReviewerId),
 			zap.String("new_reviewer_id", newReviewerId),
 			zap.Error(err),
 		)
