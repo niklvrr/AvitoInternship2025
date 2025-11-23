@@ -20,7 +20,8 @@ RETURNING id, name, author_id, status, created_at, merged_at;`
 
 	selectTeamQuery = `
 SELECT team_id FROM team_members
-WHERE user_id = $1;`
+WHERE user_id = $1
+LIMIT 1;`
 
 	selectTeamMembersQuery = `
 SELECT
@@ -234,7 +235,7 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 
 	// Не даем переназначать ревьюеров после MERGED
 	if prRes.Status == "MERGED" {
-		return nil, errInvalidInput
+		return nil, ErrPrMergedStatus
 	}
 
 	// Удалить старого ревьюера из таблицы pr_reviewers
@@ -252,7 +253,7 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 			zap.String("pr_id", d.PrId),
 			zap.String("old_reviewer_id", d.OldReviewerId),
 		)
-		return nil, errNotFound
+		return nil, ErrReviewerNotAssigned
 	}
 
 	// Добавить нового ревьюера

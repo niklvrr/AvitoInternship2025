@@ -80,7 +80,7 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 	err = tx.QueryRow(ctx, teamExistsQuery, d.TeamName).Scan(&existingTeamId)
 	if err == nil {
 		r.log.Warn("team already exists", zap.String("team_name", d.TeamName))
-		return nil, errAlreadyExists
+		return nil, ErrAlreadyExists
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		r.log.Error("failed to check existing team", zap.String("team_name", d.TeamName), zap.Error(err))
