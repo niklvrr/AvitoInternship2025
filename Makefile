@@ -1,4 +1,4 @@
-.PHONY: help build run test lint clean docker-build docker-up docker-down migrate-up migrate-down logs stop restart
+.PHONY: help build run test test-e2e test-all lint clean docker-build docker-up docker-down migrate-up migrate-down logs stop restart
 
 # Переменные
 APP_NAME := avito-internship
@@ -16,7 +16,7 @@ NC := \033[0m # No Color
 
 help: ## Показать справку по командам
 	@echo "$(GREEN)Доступные команды:$(NC)"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
 
 # Сборка и запуск
 build: ## Собрать бинарный файл
@@ -78,6 +78,13 @@ test-coverage: ## Запустить тесты с покрытием
 
 test-short: ## Запустить только быстрые тесты
 	$(GO) test -short ./...
+
+test-e2e: ## Запустить E2E тесты
+	@echo "$(GREEN)Запуск E2E тестов...$(NC)"
+	$(GO) test -v -timeout 10m ./tests/e2e/...
+
+test-all: test test-e2e ## Запустить все тесты (unit + E2E)
+	@echo "$(GREEN)Все тесты завершены!$(NC)"
 
 # Линтинг и форматирование
 lint: ## Запустить линтер

@@ -67,7 +67,7 @@ func TestPrService_Create_Success(t *testing.T) {
 	potentialReviewers := []*domain.User{
 		{Id: "reviewer1", Name: "Reviewer 1", IsActive: true},
 		{Id: "reviewer2", Name: "Reviewer 2", IsActive: true},
-		{Id: "author1", Name: "Author", IsActive: true}, // должен быть исключен
+		{Id: "author1", Name: "Author", IsActive: true},
 	}
 
 	expectedPrResult := &result.PrResult{
@@ -131,7 +131,6 @@ func TestPrService_Create_InvalidInput_EmptyPrId(t *testing.T) {
 		AuthorId: "author1",
 	}
 
-	// AuthorId валидируется первым, поэтому нужно мокировать SelectPotentialReviewers
 	potentialReviewers := []*domain.User{
 		{Id: "reviewer1", Name: "Reviewer 1", IsActive: true},
 	}
@@ -179,10 +178,9 @@ func TestPrService_Create_NoReviewersAvailable(t *testing.T) {
 		AuthorId: "author1",
 	}
 
-	// Команда существует, но нет активных ревьюеров (все неактивны или только автор)
 	potentialReviewers := []*domain.User{
-		{Id: "author1", Name: "Author", IsActive: true}, // Автор исключается
-		{Id: "user1", Name: "User 1", IsActive: false},  // Неактивный
+		{Id: "author1", Name: "Author", IsActive: true},
+		{Id: "user1", Name: "User 1", IsActive: false},
 	}
 	mockRepo.On("SelectPotentialReviewers", mock.Anything, "author1").Return(potentialReviewers, nil)
 
@@ -191,7 +189,7 @@ func TestPrService_Create_NoReviewersAvailable(t *testing.T) {
 		Name:              "Test PR",
 		AuthorId:          "author1",
 		Status:            "OPEN",
-		AssignedReviewers: []string{}, // Пустой массив
+		AssignedReviewers: []string{},
 		CreatedAt:         time.Now(),
 		MergedAt:          nil,
 	}
@@ -208,7 +206,7 @@ func TestPrService_Create_NoReviewersAvailable(t *testing.T) {
 	assert.Equal(t, "pr1", resp.PrId)
 	assert.Equal(t, "Test PR", resp.PrName)
 	assert.Equal(t, "OPEN", resp.Status)
-	assert.Len(t, resp.AssignedReviewers, 0) // Пустой массив ревьюеров
+	assert.Len(t, resp.AssignedReviewers, 0)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -279,7 +277,7 @@ func TestPrService_Reassign_Success(t *testing.T) {
 
 	potentialReviewers := []*domain.User{
 		{Id: "new_reviewer", Name: "New Reviewer", IsActive: true},
-		{Id: "old_reviewer", Name: "Old Reviewer", IsActive: true}, // должен быть исключен
+		{Id: "old_reviewer", Name: "Old Reviewer", IsActive: true},
 	}
 
 	expectedReassignResult := &result.ReassignResult{
@@ -346,7 +344,6 @@ func TestPrService_Reassign_NoCandidate(t *testing.T) {
 		OldUserId: "old_reviewer",
 	}
 
-	// Только неактивные ревьюеры или только старый ревьюер
 	potentialReviewers := []*domain.User{
 		{Id: "old_reviewer", Name: "Old Reviewer", IsActive: true},
 	}
