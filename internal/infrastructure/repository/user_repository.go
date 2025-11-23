@@ -66,7 +66,7 @@ func (r *UserRepository) SetIsActive(ctx context.Context, d *dto.SetIsActiveDTO)
 
 	if cmdTag.RowsAffected() == 0 {
 		r.log.Warn("user not found while updating activity", zap.String("user_id", d.UserId))
-		return nil, errNotFound
+		return nil, ErrNotFound
 	}
 
 	// Читаем пользователя повторно, чтобы вернуть актуальные данные

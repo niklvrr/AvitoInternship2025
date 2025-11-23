@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/repository"
 	"math/rand"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ func NewPrService(repo PrRepository, log *zap.Logger) *PrService {
 func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*response.CreateResponse, error) {
 	authorId, err := normalizeID(req.AuthorId, "author_id")
 	if err != nil {
-		return nil, err
+		return nil, WrapError(ErrInvalidInput, err)
 	}
 	s.log.Info("create PR request accepted",
 		zap.String("pr_id", req.PrId),
@@ -65,6 +66,13 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 			zap.String("author_id", authorId),
 			zap.Error(err),
 		)
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+
+		// Неизвестная ошибка
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
@@ -75,12 +83,22 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 			zap.String("author_id", authorId),
 			zap.Error(err),
 		)
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrInvalidInput) {
+			return nil, WrapError(ErrInvalidInput, err)
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+
+		// Неизвестная ошибка
 		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
 	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, err
+		return nil, WrapError(ErrInvalidInput, err)
 	}
 
 	dto := &dto.CreatPrDTO{
@@ -95,18 +113,23 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 			zap.String("pr_id", prId),
 			zap.Error(err),
 		)
-		return nil, fmt.Errorf("%w: %w", createError, err)
-	}
 
-	// Готовим список назначенных ревьюеров для ответа
-	var assignedReviewers []string
-	for _, reviewer := range res.AssignedReviewers {
-		assignedReviewers = append(assignedReviewers, reviewer)
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, WrapError(ErrPrExists, err)
+		}
+		if errors.Is(err, repository.ErrInvalidInput) {
+			return nil, WrapError(ErrInvalidInput, err)
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+		return nil, fmt.Errorf("%w: %w", createError, err)
 	}
 
 	s.log.Info("PR created",
 		zap.String("pr_id", res.Id),
-		zap.Strings("assigned_reviewers", assignedReviewers),
+		zap.Strings("assigned_reviewers", res.AssignedReviewers),
 	)
 
 	return &response.CreateResponse{
@@ -114,7 +137,7 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 		PrName:            res.Name,
 		AuthorId:          res.AuthorId,
 		Status:            res.Status,
-		AssignedReviewers: assignedReviewers,
+		AssignedReviewers: res.AssignedReviewers,
 		CreatedAt:         formatTime(res.CreatedAt),
 		MergedAt:          formatTimePtr(res.MergedAt),
 	}, nil
@@ -123,7 +146,7 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*response.MergeResponse, error) {
 	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, err
+		return nil, WrapError(ErrInvalidInput, err)
 	}
 	s.log.Info("merge PR request accepted", zap.String("pr_id", prId))
 
@@ -131,19 +154,24 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 		PrId: prId,
 	}
 
+	// Запрос в бд на изменение статуса
 	res, err := s.repo.Merge(ctx, dto)
 	if err != nil {
 		s.log.Error("failed to merge PR",
 			zap.String("pr_id", prId),
 			zap.Error(err),
 		)
-		return nil, fmt.Errorf("%w: %w", mergeError, err)
-	}
 
-	// Готовим список ревьюеров
-	var assignedReviewers []string
-	for _, reviewer := range res.AssignedReviewers {
-		assignedReviewers = append(assignedReviewers, reviewer)
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+		if errors.Is(err, repository.ErrInvalidInput) {
+			return nil, WrapError(ErrInvalidInput, err)
+		}
+
+		// Неизвестная ошибка
+		return nil, fmt.Errorf("%w: %w", mergeError, err)
 	}
 
 	s.log.Info("PR merged",
@@ -156,7 +184,7 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 		PrName:            res.Name,
 		AuthorId:          res.AuthorId,
 		Status:            res.Status,
-		AssignedReviewers: assignedReviewers,
+		AssignedReviewers: res.AssignedReviewers,
 		CreatedAt:         formatTime(res.CreatedAt),
 		MergedAt:          formatTimePtr(res.MergedAt),
 	}, nil
@@ -165,13 +193,13 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) (*response.ReassignResponse, error) {
 	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, err
+		return nil, WrapError(ErrInvalidInput, err)
 	}
 
 	// Парсим идентификатор старого ревьюера
 	oldReviewerId, err := normalizeID(req.OldUserId, "old_user_id")
 	if err != nil {
-		return nil, err
+		return nil, WrapError(ErrInvalidInput, err)
 	}
 	s.log.Info("reassign reviewer request accepted",
 		zap.String("pr_id", prId),
@@ -185,6 +213,16 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 			zap.String("old_user_id", oldReviewerId),
 			zap.Error(err),
 		)
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+		if errors.Is(err, repository.ErrInvalidInput) {
+			return nil, WrapError(ErrInvalidInput, err)
+		}
+
+		// Неизвестная ошибка
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
@@ -196,6 +234,10 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 			zap.String("old_user_id", oldReviewerId),
 			zap.Error(err),
 		)
+
+		if errors.Is(err, noPotentialReviewerError) {
+			return nil, ErrNoCandidate
+		}
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 	newReviewerId := newReviewer[0]
@@ -207,6 +249,7 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		ReplacedBy:    newReviewerId,
 	}
 
+	// Запрос в бд на переназначение ревьюеров
 	res, err := s.repo.Reassign(ctx, dto)
 	if err != nil {
 		s.log.Error("failed to reassign reviewer",
@@ -215,18 +258,29 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 			zap.String("new_reviewer_id", newReviewerId),
 			zap.Error(err),
 		)
-		return nil, fmt.Errorf("%w: %w", reassignError, err)
-	}
 
-	// Готовим список ревьюеров для ответа
-	var assignedReviewers []string
-	for _, reviewer := range res.Pr.AssignedReviewers {
-		assignedReviewers = append(assignedReviewers, reviewer)
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, WrapError(ErrPrExists, err)
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+		if errors.Is(err, repository.ErrInvalidInput) {
+			return nil, WrapError(ErrInvalidInput, err)
+		}
+		if errors.Is(err, repository.ErrPrMergedStatus) {
+			return nil, WrapError(ErrPrMerged, err)
+		}
+		if errors.Is(err, repository.ErrReviewerNotAssigned) {
+			return nil, WrapError(ErrReviewerNotAssigned, err)
+		}
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
 	s.log.Info("reviewer reassigned",
 		zap.String("pr_id", res.Pr.Id),
-		zap.Strings("assigned_reviewers", assignedReviewers),
+		zap.Strings("assigned_reviewers", res.Pr.AssignedReviewers),
 		zap.String("replaced_by", res.ReplacedBy),
 	)
 
@@ -235,7 +289,7 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		PrName:            res.Pr.Name,
 		AuthorId:          res.Pr.AuthorId,
 		Status:            res.Pr.Status,
-		AssignedReviewers: assignedReviewers,
+		AssignedReviewers: res.Pr.AssignedReviewers,
 		ReplacedBy:        res.ReplacedBy,
 		CreatedAt:         formatTime(res.Pr.CreatedAt),
 		MergedAt:          formatTimePtr(res.Pr.MergedAt),

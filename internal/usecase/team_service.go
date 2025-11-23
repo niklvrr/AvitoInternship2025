@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/repository"
+
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/request"
@@ -47,6 +49,19 @@ func (s *TeamService) Add(ctx context.Context, req *request.AddTeamRequest) (*re
 	res, err := s.repo.Add(ctx, dto)
 	if err != nil {
 		s.log.Error("failed to add team", zap.String("team_name", req.TeamName), zap.Error(err))
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrInvalidInput) {
+			return nil, WrapError(ErrInvalidInput, err)
+		}
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, WrapError(ErrTeamExists, err)
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrTeamNotFound, err)
+		}
+
+		// Неизвестная ошибка
 		return nil, fmt.Errorf("%w: %w", addTeamError, err)
 	}
 
@@ -69,6 +84,16 @@ func (s *TeamService) Get(ctx context.Context, req *request.GetTeamRequest) (*re
 	res, err := s.repo.Get(ctx, dto)
 	if err != nil {
 		s.log.Error("failed to get team", zap.String("team_name", req.TeamName), zap.Error(err))
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, WrapError(ErrTeamExists, err)
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrTeamNotFound, err)
+		}
+
+		// Неизвестная ошибка
 		return nil, fmt.Errorf("%w: %w", getTeamError, err)
 	}
 

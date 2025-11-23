@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/repository"
 
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
@@ -40,7 +41,7 @@ func (s *UserService) SetIsActive(ctx context.Context, req *request.SetIsActiveR
 	// Проверяем корректность идентификатора
 	userId, err := normalizeID(req.UserId, "user_id")
 	if err != nil {
-		return nil, err
+		return nil, WrapError(ErrInvalidInput, err)
 	}
 
 	// Собираем dto
@@ -52,6 +53,16 @@ func (s *UserService) SetIsActive(ctx context.Context, req *request.SetIsActiveR
 	// Запрос в бд
 	res, err := s.repo.SetIsActive(ctx, dto)
 	if err != nil {
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrUserNotFound, err)
+		}
+		if errors.Is(err, repository.ErrInvalidInput) {
+			return nil, WrapError(ErrInvalidInput, err)
+		}
+
+		// Неизвестная ошибка
 		return nil, fmt.Errorf(`%w: %w`, setIsActiveError, err)
 	}
 
@@ -68,7 +79,7 @@ func (s *UserService) GetReview(ctx context.Context, req *request.GetReviewReque
 	// Проверяем корректность идентификатора
 	userId, err := normalizeID(req.UserId, "user_id")
 	if err != nil {
-		return nil, err
+		return nil, WrapError(ErrInvalidInput, err)
 	}
 
 	// Собираем dto
@@ -79,6 +90,15 @@ func (s *UserService) GetReview(ctx context.Context, req *request.GetReviewReque
 	// Запрос в бд
 	res, err := s.repo.GetReview(ctx, dto)
 	if err != nil {
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrUserNotFound, err)
+		}
+		if errors.Is(err, repository.ErrInvalidInput) {
+			return nil, WrapError(ErrInvalidInput, err)
+		}
+
+		// Неизвестная ошибка
 		return nil, fmt.Errorf(`%w: %w`, getReviewError, err)
 	}
 
