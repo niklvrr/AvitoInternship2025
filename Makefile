@@ -99,44 +99,44 @@ load-test-check: ## Проверить наличие vegeta
 		exit 1; \
 	fi
 
-load-test: load-test-check ## Запустить все нагрузочные тесты через Vegeta CLI
+load-test: ## Запустить все нагрузочные тесты через Go скрипт
 	@echo "$(GREEN)Запуск нагрузочных тестов...$(NC)"
 	@echo "$(YELLOW)Убедитесь, что приложение запущено на $(LOAD_TEST_URL)$(NC)"
-	@echo "GET $(LOAD_TEST_URL)/health" | $(VEGETA) attack -rate=$(LOAD_TEST_RATE) -duration=$(LOAD_TEST_DURATION) | $(VEGETA) report
+	@cd tests/load && go run load.go all
 
-load-test-health: load-test-check ## Тест health endpoint
+load-test-health: ## Тест health endpoint (использует Go скрипт)
 	@echo "$(GREEN)Тестирование health endpoint...$(NC)"
-	@echo "GET $(LOAD_TEST_URL)/health" | $(VEGETA) attack -rate=$(LOAD_TEST_RATE) -duration=$(LOAD_TEST_DURATION) | $(VEGETA) report
+	@cd tests/load && go run load.go health
 
-load-test-team: load-test-check ## Тест team endpoints
+load-test-team: ## Тест team endpoints (использует Go скрипт)
 	@echo "$(GREEN)Тестирование team endpoints...$(NC)"
-	@$(VEGETA) attack -rate=$(LOAD_TEST_RATE) -duration=$(LOAD_TEST_DURATION) -targets=tests/load/team_add.targets | $(VEGETA) report
+	@cd tests/load && go run load.go team
 
-load-test-user: load-test-check ## Тест user endpoints
+load-test-user: ## Тест user endpoints (использует Go скрипт)
 	@echo "$(GREEN)Тестирование user endpoints...$(NC)"
-	@$(VEGETA) attack -rate=$(LOAD_TEST_RATE) -duration=$(LOAD_TEST_DURATION) -targets=tests/load/user_setIsActive.targets | $(VEGETA) report
+	@cd tests/load && go run load.go user
 
-load-test-pr: load-test-check ## Тест PR endpoints
+load-test-pr: ## Тест PR endpoints (использует Go скрипт)
 	@echo "$(GREEN)Тестирование PR endpoints...$(NC)"
 	@echo "$(YELLOW)Примечание: для тестов PR необходимо предварительно создать команду и пользователей$(NC)"
-	@$(VEGETA) attack -rate=$(LOAD_TEST_RATE) -duration=$(LOAD_TEST_DURATION) -targets=tests/load/pr_create.targets | $(VEGETA) report
+	@cd tests/load && go run load.go pr
 
 load-test-go: ## Запустить нагрузочные тесты через Go скрипт
 	@echo "$(GREEN)Запуск нагрузочных тестов через Go...$(NC)"
 	@echo "$(YELLOW)Убедитесь, что приложение запущено на $(LOAD_TEST_URL)$(NC)"
-	@cd tests/load && go run load_test.go all
+	@cd tests/load && go run load.go all
 
 load-test-go-health: ## Тест health через Go скрипт
-	@cd tests/load && go run load_test.go health
+	@cd tests/load && go run load.go health
 
 load-test-go-team: ## Тест team через Go скрипт
-	@cd tests/load && go run load_test.go team
+	@cd tests/load && go run load.go team
 
 load-test-go-user: ## Тест user через Go скрипт
-	@cd tests/load && go run load_test.go user
+	@cd tests/load && go run load.go user
 
 load-test-go-pr: ## Тест PR через Go скрипт
-	@cd tests/load && go run load_test.go pr
+	@cd tests/load && go run load.go pr
 
 load-test-save: load-test-check ## Запустить тесты и сохранить результаты в файл
 	@echo "$(GREEN)Запуск тестов с сохранением результатов...$(NC)"
