@@ -27,7 +27,7 @@ func TestHandleDBError_ForeignKeyViolation(t *testing.T) {
 		Code: "23503",
 	}
 	err := handleDBError(pgErr)
-	assert.ErrorIs(t, err, ErrInvalidInput)
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestHandleDBError_NotNullViolation(t *testing.T) {
@@ -35,7 +35,7 @@ func TestHandleDBError_NotNullViolation(t *testing.T) {
 		Code: "23502",
 	}
 	err := handleDBError(pgErr)
-	assert.ErrorIs(t, err, ErrInvalidInput)
+	assert.Equal(t, pgErr, err)
 }
 
 func TestHandleDBError_CheckViolation(t *testing.T) {
@@ -43,7 +43,7 @@ func TestHandleDBError_CheckViolation(t *testing.T) {
 		Code: "23514",
 	}
 	err := handleDBError(pgErr)
-	assert.ErrorIs(t, err, ErrInvalidInput)
+	assert.Equal(t, pgErr, err)
 }
 
 func TestHandleDBError_UnknownError(t *testing.T) {
@@ -56,4 +56,3 @@ func TestHandleDBError_Nil(t *testing.T) {
 	err := handleDBError(nil)
 	assert.NoError(t, err)
 }
-

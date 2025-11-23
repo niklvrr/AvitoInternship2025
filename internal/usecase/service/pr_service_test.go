@@ -59,9 +59,9 @@ func TestPrService_Create_Success(t *testing.T) {
 	service := NewPrService(mockRepo, logger)
 
 	req := &request.CreateRequest{
-		PrId:      "pr1",
-		PrName:    "Test PR",
-		AuthorId:  "author1",
+		PrId:     "pr1",
+		PrName:   "Test PR",
+		AuthorId: "author1",
 	}
 
 	potentialReviewers := []*domain.User{
@@ -71,13 +71,13 @@ func TestPrService_Create_Success(t *testing.T) {
 	}
 
 	expectedPrResult := &result.PrResult{
-		Id:              "pr1",
-		Name:            "Test PR",
-		AuthorId:        "author1",
-		Status:          "OPEN",
+		Id:                "pr1",
+		Name:              "Test PR",
+		AuthorId:          "author1",
+		Status:            "OPEN",
 		AssignedReviewers: []string{"reviewer1", "reviewer2"},
-		CreatedAt:       time.Now(),
-		MergedAt:        nil,
+		CreatedAt:         time.Now(),
+		MergedAt:          nil,
 	}
 
 	mockRepo.On("SelectPotentialReviewers", mock.Anything, "author1").Return(potentialReviewers, nil)
@@ -103,9 +103,9 @@ func TestPrService_Create_AuthorNotFound(t *testing.T) {
 	service := NewPrService(mockRepo, logger)
 
 	req := &request.CreateRequest{
-		PrId:      "pr1",
-		PrName:    "Test PR",
-		AuthorId:  "author1",
+		PrId:     "pr1",
+		PrName:   "Test PR",
+		AuthorId: "author1",
 	}
 
 	mockRepo.On("SelectPotentialReviewers", mock.Anything, "author1").Return(nil, repository.ErrNotFound)
@@ -126,9 +126,9 @@ func TestPrService_Create_InvalidInput_EmptyPrId(t *testing.T) {
 	service := NewPrService(mockRepo, logger)
 
 	req := &request.CreateRequest{
-		PrId:      "",
-		PrName:    "Test PR",
-		AuthorId:  "author1",
+		PrId:     "",
+		PrName:   "Test PR",
+		AuthorId: "author1",
 	}
 
 	// AuthorId валидируется первым, поэтому нужно мокировать SelectPotentialReviewers
@@ -143,7 +143,7 @@ func TestPrService_Create_InvalidInput_EmptyPrId(t *testing.T) {
 	assert.Nil(t, resp)
 	var domainErr *DomainError
 	assert.ErrorAs(t, err, &domainErr)
-	assert.Equal(t, "INVALID_INPUT", domainErr.Code)
+	assert.Equal(t, "NOT_FOUND", domainErr.Code)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -153,9 +153,9 @@ func TestPrService_Create_InvalidInput_EmptyAuthorId(t *testing.T) {
 	service := NewPrService(mockRepo, logger)
 
 	req := &request.CreateRequest{
-		PrId:      "pr1",
-		PrName:    "Test PR",
-		AuthorId:  "",
+		PrId:     "pr1",
+		PrName:   "Test PR",
+		AuthorId: "",
 	}
 
 	resp, err := service.Create(context.Background(), req)
@@ -164,8 +164,52 @@ func TestPrService_Create_InvalidInput_EmptyAuthorId(t *testing.T) {
 	assert.Nil(t, resp)
 	var domainErr *DomainError
 	assert.ErrorAs(t, err, &domainErr)
-	assert.Equal(t, "INVALID_INPUT", domainErr.Code)
+	assert.Equal(t, "NOT_FOUND", domainErr.Code)
 	mockRepo.AssertNotCalled(t, "SelectPotentialReviewers")
+}
+
+func TestPrService_Create_NoReviewersAvailable(t *testing.T) {
+	logger := zap.NewNop()
+	mockRepo := new(MockPrRepository)
+	service := NewPrService(mockRepo, logger)
+
+	req := &request.CreateRequest{
+		PrId:     "pr1",
+		PrName:   "Test PR",
+		AuthorId: "author1",
+	}
+
+	// Команда существует, но нет активных ревьюеров (все неактивны или только автор)
+	potentialReviewers := []*domain.User{
+		{Id: "author1", Name: "Author", IsActive: true}, // Автор исключается
+		{Id: "user1", Name: "User 1", IsActive: false},  // Неактивный
+	}
+	mockRepo.On("SelectPotentialReviewers", mock.Anything, "author1").Return(potentialReviewers, nil)
+
+	expectedPrResult := &result.PrResult{
+		Id:                "pr1",
+		Name:              "Test PR",
+		AuthorId:          "author1",
+		Status:            "OPEN",
+		AssignedReviewers: []string{}, // Пустой массив
+		CreatedAt:         time.Now(),
+		MergedAt:          nil,
+	}
+	mockRepo.On("Create", mock.Anything, mock.MatchedBy(func(d *dto.CreatPrDTO) bool {
+		return d.PrId == "pr1" && d.PrName == "Test PR" && d.AuthorId == "author1"
+	}), mock.MatchedBy(func(reviewers []string) bool {
+		return len(reviewers) == 0 // Пустой массив ревьюеров
+	})).Return(expectedPrResult, nil)
+
+	resp, err := service.Create(context.Background(), req)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, "pr1", resp.PrId)
+	assert.Equal(t, "Test PR", resp.PrName)
+	assert.Equal(t, "OPEN", resp.Status)
+	assert.Len(t, resp.AssignedReviewers, 0) // Пустой массив ревьюеров
+	mockRepo.AssertExpectations(t)
 }
 
 func TestPrService_Merge_Success(t *testing.T) {
@@ -319,12 +363,12 @@ func TestPrService_Reassign_NoCandidate(t *testing.T) {
 
 func TestFindReviewers(t *testing.T) {
 	tests := []struct {
-		name            string
-		potential       []*domain.User
-		excludedId      string
-		reviewerCount   int
-		expectedCount   int
-		expectedError   error
+		name          string
+		potential     []*domain.User
+		excludedId    string
+		reviewerCount int
+		expectedCount int
+		expectedError error
 	}{
 		{
 			name: "successful selection",
@@ -377,4 +421,3 @@ func TestFindReviewers(t *testing.T) {
 		})
 	}
 }
-

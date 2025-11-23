@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/niklvrr/AvitoInternship2025/internal/usecase/service"
-
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/request"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/response"
 	"go.uber.org/zap"
@@ -40,14 +38,6 @@ func (h *UserHandler) SetIsActive(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.log.Error("failed to decode request body", zap.Error(err))
 		statusCode, errResp := HandleError(err)
-		WriteError(w, statusCode, errResp)
-		return
-	}
-
-	// Валидация
-	if req.UserId == "" {
-		h.log.Warn("validation failed: user_id is empty")
-		statusCode, errResp := HandleError(service.ErrInvalidInput)
 		WriteError(w, statusCode, errResp)
 		return
 	}
@@ -88,12 +78,6 @@ func (h *UserHandler) GetReview(w http.ResponseWriter, r *http.Request) {
 
 	// Получаем user_id из query параметров
 	userId := r.URL.Query().Get("user_id")
-	if userId == "" {
-		h.log.Warn("validation failed: user_id query parameter is empty")
-		statusCode, errResp := HandleError(service.ErrInvalidInput)
-		WriteError(w, statusCode, errResp)
-		return
-	}
 
 	// Формируем запрос
 	req := request.GetReviewRequest{

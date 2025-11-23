@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/niklvrr/AvitoInternship2025/internal/usecase/service"
-
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/request"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/response"
 	"go.uber.org/zap"
@@ -40,14 +38,6 @@ func (h *TeamHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.log.Error("failed to decode request body", zap.Error(err))
 		statusCode, errResp := HandleError(err)
-		WriteError(w, statusCode, errResp)
-		return
-	}
-
-	// Валидация
-	if req.TeamName == "" {
-		h.log.Warn("validation failed: team_name is empty")
-		statusCode, errResp := HandleError(service.ErrInvalidInput)
 		WriteError(w, statusCode, errResp)
 		return
 	}
@@ -99,12 +89,6 @@ func (h *TeamHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
 
 	// Получаем team_name из query параметров
 	teamName := r.URL.Query().Get("team_name")
-	if teamName == "" {
-		h.log.Warn("validation failed: team_name query parameter is empty")
-		statusCode, errResp := HandleError(service.ErrInvalidInput)
-		WriteError(w, statusCode, errResp)
-		return
-	}
 
 	// Формируем запрос
 	req := request.GetTeamRequest{

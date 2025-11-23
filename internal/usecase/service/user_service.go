@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/repository"
 
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
@@ -46,7 +47,7 @@ func (s *UserService) SetIsActive(ctx context.Context, req *request.SetIsActiveR
 	// Проверяем корректность идентификатора
 	userId, err := normalizeID(req.UserId, "user_id")
 	if err != nil {
-		return nil, WrapError(ErrInvalidInput, err)
+		return nil, WrapError(ErrUserNotFound, err)
 	}
 
 	// Собираем dto
@@ -67,9 +68,6 @@ func (s *UserService) SetIsActive(ctx context.Context, req *request.SetIsActiveR
 		// Маппим ошибки
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, WrapError(ErrUserNotFound, err)
-		}
-		if errors.Is(err, repository.ErrInvalidInput) {
-			return nil, WrapError(ErrInvalidInput, err)
 		}
 
 		// Неизвестная ошибка
@@ -99,7 +97,7 @@ func (s *UserService) GetReview(ctx context.Context, req *request.GetReviewReque
 	// Проверяем корректность идентификатора
 	userId, err := normalizeID(req.UserId, "user_id")
 	if err != nil {
-		return nil, WrapError(ErrInvalidInput, err)
+		return nil, WrapError(ErrUserNotFound, err)
 	}
 
 	// Собираем dto
@@ -118,9 +116,6 @@ func (s *UserService) GetReview(ctx context.Context, req *request.GetReviewReque
 		// Маппим ошибки
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, WrapError(ErrUserNotFound, err)
-		}
-		if errors.Is(err, repository.ErrInvalidInput) {
-			return nil, WrapError(ErrInvalidInput, err)
 		}
 
 		// Неизвестная ошибка
