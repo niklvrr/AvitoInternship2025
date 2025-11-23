@@ -13,6 +13,3 @@ go.work
 go.work.sum
 
 .env
-
-tests/load/results.bin
-tests/load/plot.html
