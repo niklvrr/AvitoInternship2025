@@ -53,7 +53,7 @@ func NewPrService(repo PrRepository, log *zap.Logger) *PrService {
 func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*response.CreateResponse, error) {
 	authorId, err := normalizeID(req.AuthorId, "author_id")
 	if err != nil {
-		return nil, WrapError(ErrInvalidInput, err)
+		return nil, WrapError(ErrPrNotFound, err)
 	}
 	s.log.Info("create PR request accepted",
 		zap.String("pr_id", req.PrId),
@@ -92,9 +92,6 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 			)
 
 			// Маппим другие ошибки
-			if errors.Is(err, repository.ErrInvalidInput) {
-				return nil, WrapError(ErrInvalidInput, err)
-			}
 			if errors.Is(err, repository.ErrNotFound) {
 				return nil, WrapError(ErrPrNotFound, err)
 			}
@@ -106,7 +103,7 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 
 	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, WrapError(ErrInvalidInput, err)
+		return nil, WrapError(ErrPrNotFound, err)
 	}
 
 	dto := &dto.CreatPrDTO{
@@ -125,9 +122,6 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 		// Маппим ошибки
 		if errors.Is(err, repository.ErrAlreadyExists) {
 			return nil, WrapError(ErrPrExists, err)
-		}
-		if errors.Is(err, repository.ErrInvalidInput) {
-			return nil, WrapError(ErrInvalidInput, err)
 		}
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, WrapError(ErrPrNotFound, err)
@@ -154,7 +148,7 @@ func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*re
 func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*response.MergeResponse, error) {
 	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, WrapError(ErrInvalidInput, err)
+		return nil, WrapError(ErrPrNotFound, err)
 	}
 	s.log.Info("merge PR request accepted", zap.String("pr_id", prId))
 
@@ -173,9 +167,6 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 		// Маппим ошибки
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, WrapError(ErrPrNotFound, err)
-		}
-		if errors.Is(err, repository.ErrInvalidInput) {
-			return nil, WrapError(ErrInvalidInput, err)
 		}
 
 		// Неизвестная ошибка
@@ -201,13 +192,13 @@ func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*resp
 func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) (*response.ReassignResponse, error) {
 	prId, err := normalizeID(req.PrId, "pull_request_id")
 	if err != nil {
-		return nil, WrapError(ErrInvalidInput, err)
+		return nil, WrapError(ErrPrNotFound, err)
 	}
 
 	// Парсим идентификатор старого ревьюера
 	oldReviewerId, err := normalizeID(req.OldUserId, "old_user_id")
 	if err != nil {
-		return nil, WrapError(ErrInvalidInput, err)
+		return nil, WrapError(ErrPrNotFound, err)
 	}
 	s.log.Info("reassign reviewer request accepted",
 		zap.String("pr_id", prId),
@@ -225,9 +216,6 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		// Маппим ошибки
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, WrapError(ErrPrNotFound, err)
-		}
-		if errors.Is(err, repository.ErrInvalidInput) {
-			return nil, WrapError(ErrInvalidInput, err)
 		}
 
 		// Неизвестная ошибка
@@ -273,9 +261,6 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		}
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, WrapError(ErrPrNotFound, err)
-		}
-		if errors.Is(err, repository.ErrInvalidInput) {
-			return nil, WrapError(ErrInvalidInput, err)
 		}
 		if errors.Is(err, repository.ErrPrMergedStatus) {
 			return nil, WrapError(ErrPrMerged, err)

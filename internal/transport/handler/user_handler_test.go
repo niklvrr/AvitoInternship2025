@@ -90,10 +90,12 @@ func TestUserHandler_SetIsActive_InvalidInput(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
+	mockService.On("SetIsActive", mock.Anything, &reqBody).Return(nil, service.ErrUserNotFound)
+
 	handler.SetIsActive(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	mockService.AssertNotCalled(t, "SetIsActive")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockService.AssertExpectations(t)
 }
 
 func TestUserHandler_SetIsActive_UserNotFound(t *testing.T) {
@@ -169,10 +171,13 @@ func TestUserHandler_GetReview_InvalidInput(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/users/getReview", nil)
 	w := httptest.NewRecorder()
 
+	reqBody := request.GetReviewRequest{UserId: ""}
+	mockService.On("GetReview", mock.Anything, &reqBody).Return(nil, service.ErrUserNotFound)
+
 	handler.GetReview(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	mockService.AssertNotCalled(t, "GetReview")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockService.AssertExpectations(t)
 }
 
 func TestUserHandler_GetReview_UserNotFound(t *testing.T) {
@@ -194,4 +199,3 @@ func TestUserHandler_GetReview_UserNotFound(t *testing.T) {
 	assert.Contains(t, result, "error")
 	mockService.AssertExpectations(t)
 }
-

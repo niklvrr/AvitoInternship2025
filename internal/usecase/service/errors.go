@@ -78,10 +78,4 @@ var (
 		Code:    "NO_CANDIDATE",
 		Message: "no active replacement candidate in team",
 	}
-
-	// INVALID_INPUT
-	ErrInvalidInput = &DomainError{
-		Code:    "INVALID_INPUT",
-		Message: "invalid input",
-	}
 )

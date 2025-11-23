@@ -10,7 +10,6 @@ import (
 var (
 	ErrNotFound            = errors.New("resource not found")
 	ErrAlreadyExists       = errors.New("resource already exists")
-	ErrInvalidInput        = errors.New("invalid input")
 	ErrPrMergedStatus      = errors.New("PR is merged")
 	ErrReviewerNotAssigned = errors.New("reviewer not assigned")
 )
@@ -27,8 +26,10 @@ func handleDBError(err error) error {
 		switch pgErr.Code {
 		case "23505":
 			return ErrAlreadyExists
-		case "23503", "23502", "23514":
-			return ErrInvalidInput
+		case "23503":
+			return ErrNotFound
+		case "23502", "23514":
+			return err
 		}
 	}
 	return err

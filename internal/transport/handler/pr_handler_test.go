@@ -52,9 +52,9 @@ func TestPrHandler_CreatePr_Success(t *testing.T) {
 	handler := NewPrHandler(mockService, logger)
 
 	reqBody := request.CreateRequest{
-		PrId:      "pr1",
-		PrName:    "Test PR",
-		AuthorId:  "author1",
+		PrId:     "pr1",
+		PrName:   "Test PR",
+		AuthorId: "author1",
 	}
 
 	expectedResp := &response.CreateResponse{
@@ -102,10 +102,12 @@ func TestPrHandler_CreatePr_InvalidInput(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
+	mockService.On("Create", mock.Anything, &reqBody).Return(nil, service.ErrPrNotFound)
+
 	handler.CreatePr(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	mockService.AssertNotCalled(t, "Create")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockService.AssertExpectations(t)
 }
 
 func TestPrHandler_CreatePr_PrExists(t *testing.T) {
@@ -114,9 +116,9 @@ func TestPrHandler_CreatePr_PrExists(t *testing.T) {
 	handler := NewPrHandler(mockService, logger)
 
 	reqBody := request.CreateRequest{
-		PrId:      "pr1",
-		PrName:    "Test PR",
-		AuthorId:  "author1",
+		PrId:     "pr1",
+		PrName:   "Test PR",
+		AuthorId: "author1",
 	}
 
 	mockService.On("Create", mock.Anything, mock.Anything).Return(nil, service.WrapError(service.ErrPrExists, nil))
@@ -189,10 +191,12 @@ func TestPrHandler_MergePr_InvalidInput(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
+	mockService.On("Merge", mock.Anything, &reqBody).Return(nil, service.ErrPrNotFound)
+
 	handler.MergePr(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	mockService.AssertNotCalled(t, "Merge")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockService.AssertExpectations(t)
 }
 
 func TestPrHandler_ReassignPr_Success(t *testing.T) {
@@ -251,10 +255,12 @@ func TestPrHandler_ReassignPr_InvalidInput(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
+	mockService.On("Reassign", mock.Anything, &reqBody).Return(nil, service.ErrPrNotFound)
+
 	handler.ReassignPr(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	mockService.AssertNotCalled(t, "Reassign")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockService.AssertExpectations(t)
 }
 
 func TestPrHandler_ReassignPr_PrMerged(t *testing.T) {
@@ -283,4 +289,3 @@ func TestPrHandler_ReassignPr_PrMerged(t *testing.T) {
 	assert.Contains(t, result, "error")
 	mockService.AssertExpectations(t)
 }
-

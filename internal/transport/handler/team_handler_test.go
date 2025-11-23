@@ -98,10 +98,12 @@ func TestTeamHandler_AddTeam_InvalidInput(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
+	mockService.On("Add", mock.Anything, &reqBody).Return(nil, service.ErrTeamNotFound)
+
 	handler.AddTeam(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	mockService.AssertNotCalled(t, "Add")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockService.AssertExpectations(t)
 }
 
 func TestTeamHandler_AddTeam_TeamExists(t *testing.T) {
@@ -177,10 +179,13 @@ func TestTeamHandler_GetTeam_InvalidInput(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/team/get", nil)
 	w := httptest.NewRecorder()
 
+	reqBody := request.GetTeamRequest{TeamName: ""}
+	mockService.On("Get", mock.Anything, &reqBody).Return(nil, service.ErrTeamNotFound)
+
 	handler.GetTeam(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	mockService.AssertNotCalled(t, "Get")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockService.AssertExpectations(t)
 }
 
 func TestTeamHandler_GetTeam_TeamNotFound(t *testing.T) {
@@ -202,4 +207,3 @@ func TestTeamHandler_GetTeam_TeamNotFound(t *testing.T) {
 	assert.Contains(t, result, "error")
 	mockService.AssertExpectations(t)
 }
-

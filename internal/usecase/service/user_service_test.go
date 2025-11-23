@@ -107,7 +107,7 @@ func TestUserService_SetIsActive_InvalidInput(t *testing.T) {
 	assert.Nil(t, resp)
 	var domainErr *DomainError
 	assert.ErrorAs(t, err, &domainErr)
-	assert.Equal(t, "INVALID_INPUT", domainErr.Code)
+	assert.Equal(t, "NOT_FOUND", domainErr.Code)
 	mockRepo.AssertNotCalled(t, "SetIsActive")
 }
 
@@ -194,7 +194,6 @@ func TestUserService_GetReview_InvalidInput(t *testing.T) {
 	assert.Nil(t, resp)
 	var domainErr *DomainError
 	assert.ErrorAs(t, err, &domainErr)
-	assert.Equal(t, "INVALID_INPUT", domainErr.Code)
+	assert.Equal(t, "NOT_FOUND", domainErr.Code)
 	mockRepo.AssertNotCalled(t, "GetReview")
 }
-

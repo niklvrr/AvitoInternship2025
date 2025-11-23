@@ -50,9 +50,6 @@ func (s *TeamService) Add(ctx context.Context, req *request.AddTeamRequest) (*re
 		s.log.Error("failed to add team", zap.String("team_name", req.TeamName), zap.Error(err))
 
 		// Маппим ошибки
-		if errors.Is(err, repository.ErrInvalidInput) {
-			return nil, WrapError(ErrInvalidInput, err)
-		}
 		if errors.Is(err, repository.ErrAlreadyExists) {
 			return nil, WrapError(ErrTeamExists, err)
 		}

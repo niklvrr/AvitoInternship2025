@@ -143,7 +143,7 @@ func TestPrService_Create_InvalidInput_EmptyPrId(t *testing.T) {
 	assert.Nil(t, resp)
 	var domainErr *DomainError
 	assert.ErrorAs(t, err, &domainErr)
-	assert.Equal(t, "INVALID_INPUT", domainErr.Code)
+	assert.Equal(t, "NOT_FOUND", domainErr.Code)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -164,7 +164,7 @@ func TestPrService_Create_InvalidInput_EmptyAuthorId(t *testing.T) {
 	assert.Nil(t, resp)
 	var domainErr *DomainError
 	assert.ErrorAs(t, err, &domainErr)
-	assert.Equal(t, "INVALID_INPUT", domainErr.Code)
+	assert.Equal(t, "NOT_FOUND", domainErr.Code)
 	mockRepo.AssertNotCalled(t, "SelectPotentialReviewers")
 }
 

@@ -58,8 +58,6 @@ func mapErrorCodeToHTTPStatus(code string) int {
 		return http.StatusConflict // 409
 	case "NOT_FOUND":
 		return http.StatusNotFound // 404
-	case "INVALID_INPUT":
-		return http.StatusBadRequest // 400
 	default:
 		return http.StatusInternalServerError // 500
 	}
