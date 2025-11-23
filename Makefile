@@ -1,4 +1,4 @@
-.PHONY: help build run test test-e2e test-all lint clean docker-build docker-up docker-down migrate-up migrate-down logs stop restart
+.PHONY: help build run test lint clean docker-build docker-up docker-down migrate-up migrate-down logs stop restart
 
 # Переменные
 APP_NAME := avito-internship
