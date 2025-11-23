@@ -15,6 +15,7 @@ func NewRouter(
 	userHandler *handler.UserHandler,
 	teamHandler *handler.TeamHandler,
 	prHandler *handler.PrHandler,
+	statsHandler *handler.StatsHandler,
 	healthHandler *handler.HealthHandler,
 	log *zap.Logger,
 ) *chi.Mux {
@@ -53,6 +54,8 @@ func NewRouter(
 		r.Post("/merge", prHandler.MergePr)
 		r.Post("/reassign", prHandler.ReassignPr)
 	})
+
+	router.Get("/stats", statsHandler.GetStats)
 
 	router.Get("/health", healthHandler.HealthCheck)
 	return router

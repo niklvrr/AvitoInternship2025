@@ -27,4 +27,3 @@ func TestHealthHandler_HealthCheck(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "ok", result["status"])
 }
-

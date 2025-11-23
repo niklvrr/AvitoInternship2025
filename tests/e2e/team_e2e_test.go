@@ -1,9 +1,7 @@
 package e2e
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -12,109 +10,164 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestTeamAdd_Success проверяет создание команды
-func TestTeamAdd_Success(t *testing.T) {
-	uniqueName := fmt.Sprintf("team_add_%d", time.Now().UnixNano())
-
-	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+func TestTeam_Add_Success(t *testing.T) {
+	reqBody := map[string]interface{}{
+		"team_name": "e2e-team-1",
 		"members": []map[string]interface{}{
-			{"user_id": "u1_add", "username": "Alice", "is_active": true},
-			{"user_id": "u2_add", "username": "Bob", "is_active": true},
+			{"user_id": "e2e-u1", "username": "Alice", "is_active": true},
+			{"user_id": "e2e-u2", "username": "Bob", "is_active": true},
 		},
 	}
 
-	body, err := json.Marshal(teamReq)
-	require.NoError(t, err)
-
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+	resp := makeRequest(t, http.MethodPost, baseURL+"/team/add", reqBody)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusCreated, resp.StatusCode, "Expected 201 Created")
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var response map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&response)
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	require.Contains(t, response, "team", "Response must have 'team' wrapper")
+	assert.Contains(t, result, "team")
+	team, ok := result["team"].(map[string]interface{})
+	require.True(t, ok)
 
-	team := response["team"].(map[string]interface{})
-	validateTeam(t, team)
-	assert.Equal(t, uniqueName, team["team_name"])
+	assert.Equal(t, "e2e-team-1", team["team_name"])
+	assert.Contains(t, team, "members")
 
-	time.Sleep(200 * time.Millisecond)
+	members, ok := team["members"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, members, 2)
+
+	member1, ok := members[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "e2e-u1", member1["user_id"])
+	assert.Equal(t, "Alice", member1["username"])
+	assert.Equal(t, true, member1["is_active"])
+
+	member2, ok := members[1].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "e2e-u2", member2["user_id"])
+	assert.Equal(t, "Bob", member2["username"])
+	assert.Equal(t, true, member2["is_active"])
 }
 
-// TestTeamAdd_Duplicate проверяет создание команды с дубликатом
-func TestTeamAdd_Duplicate(t *testing.T) {
-	uniqueName := fmt.Sprintf("team_dup_%d", time.Now().UnixNano())
-
-	// Создаем команду первый раз
-	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
-		"members":   []map[string]interface{}{},
-	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusCreated, resp.StatusCode)
-
-	time.Sleep(200 * time.Millisecond)
-
-	// Пытаемся создать еще раз
-	body, _ = json.Marshal(teamReq)
-	resp, err = http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	validateErrorResponse(t, resp, "TEAM_EXISTS", http.StatusBadRequest)
-}
-
-// TestTeamGet_Success проверяет получение команды
-func TestTeamGet_Success(t *testing.T) {
-	uniqueName := fmt.Sprintf("team_get_%d", time.Now().UnixNano())
-
-	// Создаем команду
-	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+func TestTeam_Add_DuplicateTeam(t *testing.T) {
+	reqBody := map[string]interface{}{
+		"team_name": "e2e-team-duplicate",
 		"members": []map[string]interface{}{
-			{"user_id": "u1_get", "username": "Alice", "is_active": true},
-			{"user_id": "u2_get", "username": "Bob", "is_active": false},
+			{"user_id": "e2e-u3", "username": "Charlie", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(200 * time.Millisecond)
 
-	// Получаем команду
-	resp, err = http.Get(testServer.URL + "/team/get?team_name=" + uniqueName)
-	require.NoError(t, err)
-	defer resp.Body.Close()
+	resp1 := makeRequest(t, http.MethodPost, baseURL+"/team/add", reqBody)
+	resp1.Body.Close()
+	assert.Equal(t, http.StatusCreated, resp1.StatusCode)
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "Expected 200 OK")
+	time.Sleep(100 * time.Millisecond)
 
-	var team map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&team)
-	require.NoError(t, err)
+	resp2 := makeRequest(t, http.MethodPost, baseURL+"/team/add", reqBody)
+	defer resp2.Body.Close()
 
-	validateTeam(t, team)
-	assert.Equal(t, uniqueName, team["team_name"])
+	assert.Equal(t, http.StatusBadRequest, resp2.StatusCode)
 
-	members := team["members"].([]interface{})
-	assert.Len(t, members, 2, "Team must have 2 members")
+	errorResp := parseErrorResponse(t, resp2)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "TEAM_EXISTS", errorObj["code"])
+	assert.Contains(t, errorObj["message"], "team_name already exists")
 }
 
-// TestTeamGet_NotFound проверяет получение несуществующей команды
-func TestTeamGet_NotFound(t *testing.T) {
-	nonexistentName := fmt.Sprintf("nonexistent_%d", time.Now().UnixNano())
+func TestTeam_Add_EmptyMembers(t *testing.T) {
+	reqBody := map[string]interface{}{
+		"team_name": "e2e-team-empty",
+		"members":   []interface{}{},
+	}
 
-	resp, err := http.Get(testServer.URL + "/team/get?team_name=" + nonexistentName)
-	require.NoError(t, err)
+	resp := makeRequest(t, http.MethodPost, baseURL+"/team/add", reqBody)
 	defer resp.Body.Close()
 
-	validateErrorResponse(t, resp, "NOT_FOUND", http.StatusNotFound)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+
+	assert.Contains(t, result, "team")
+	team, ok := result["team"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "e2e-team-empty", team["team_name"])
+
+	members, ok := team["members"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, members, 0)
+}
+
+func TestTeam_Get_Success(t *testing.T) {
+	reqBody := map[string]interface{}{
+		"team_name": "e2e-team-get",
+		"members": []map[string]interface{}{
+			{"user_id": "e2e-u4", "username": "David", "is_active": true},
+			{"user_id": "e2e-u5", "username": "Eve", "is_active": false},
+		},
+	}
+
+	createResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", reqBody)
+	createResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp := makeRequest(t, http.MethodGet, baseURL+"/team/get?team_name=e2e-team-get", nil)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+
+	assert.Equal(t, "e2e-team-get", result["team_name"])
+	assert.Contains(t, result, "members")
+
+	members, ok := result["members"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, members, 2)
+
+	memberMap := make(map[string]map[string]interface{})
+	for _, m := range members {
+		member, ok := m.(map[string]interface{})
+		require.True(t, ok)
+		userID, ok := member["user_id"].(string)
+		require.True(t, ok)
+		memberMap[userID] = member
+	}
+
+	assert.Equal(t, "David", memberMap["e2e-u4"]["username"])
+	assert.Equal(t, true, memberMap["e2e-u4"]["is_active"])
+	assert.Equal(t, "Eve", memberMap["e2e-u5"]["username"])
+	assert.Equal(t, false, memberMap["e2e-u5"]["is_active"])
+}
+
+func TestTeam_Get_NotFound(t *testing.T) {
+	resp := makeRequest(t, http.MethodGet, baseURL+"/team/get?team_name=e2e-nonexistent-team", nil)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	errorResp := parseErrorResponse(t, resp)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "NOT_FOUND", errorObj["code"])
+}
+
+func TestTeam_Get_MissingTeamName(t *testing.T) {
+	resp := makeRequest(t, http.MethodGet, baseURL+"/team/get", nil)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }

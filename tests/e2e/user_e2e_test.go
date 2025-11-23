@@ -1,9 +1,7 @@
 package e2e
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -12,115 +10,209 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUserSetIsActive_Success проверяет установку флага активности пользователя
-func TestUserSetIsActive_Success(t *testing.T) {
-	uniqueName := fmt.Sprintf("user_setactive_%d", time.Now().UnixNano())
-	userID := "u_setactive"
-
-	// Создаем команду с пользователем
+func TestUser_SetIsActive_Success(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-setactive",
 		"members": []map[string]interface{}{
-			{"user_id": userID, "username": "TestUser", "is_active": true},
+			{"user_id": "e2e-u-setactive", "username": "SetActiveUser", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	// Деактивируем пользователя
-	setActiveReq := map[string]interface{}{
-		"user_id":   userID,
+	createResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	reqBody := map[string]interface{}{
+		"user_id":   "e2e-u-setactive",
 		"is_active": false,
 	}
-	body, _ = json.Marshal(setActiveReq)
-	resp, err = http.Post(testServer.URL+"/users/setIsActive", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/users/setIsActive", reqBody)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "Expected 200 OK")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var response map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&response)
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	require.Contains(t, response, "user", "Response must have 'user' wrapper")
+	assert.Contains(t, result, "user")
+	user, ok := result["user"].(map[string]interface{})
+	require.True(t, ok)
 
-	user := response["user"].(map[string]interface{})
-	validateUser(t, user)
-	assert.Equal(t, userID, user["user_id"])
+	assert.Equal(t, "e2e-u-setactive", user["user_id"])
+	assert.Equal(t, "SetActiveUser", user["username"])
+	assert.Equal(t, "e2e-team-setactive", user["team_name"])
 	assert.Equal(t, false, user["is_active"])
 }
 
-// TestUserSetIsActive_NotFound проверяет установку флага для несуществующего пользователя
-func TestUserSetIsActive_NotFound(t *testing.T) {
-	setActiveReq := map[string]interface{}{
-		"user_id":   "nonexistent_user",
+func TestUser_SetIsActive_NotFound(t *testing.T) {
+	reqBody := map[string]interface{}{
+		"user_id":   "e2e-nonexistent-user",
 		"is_active": true,
 	}
-	body, _ := json.Marshal(setActiveReq)
-	resp, err := http.Post(testServer.URL+"/users/setIsActive", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/users/setIsActive", reqBody)
 	defer resp.Body.Close()
 
-	validateErrorResponse(t, resp, "NOT_FOUND", http.StatusNotFound)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	errorResp := parseErrorResponse(t, resp)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "NOT_FOUND", errorObj["code"])
 }
 
-// TestUserGetReview_Success проверяет получение ревьюев пользователя
-func TestUserGetReview_Success(t *testing.T) {
-	uniqueName := fmt.Sprintf("user_getreview_%d", time.Now().UnixNano())
-	authorID := "u_author_getreview"
-	reviewerID := "u_reviewer_getreview"
-
-	// Создаем команду
+func TestUser_SetIsActive_Activate(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-activate",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": reviewerID, "username": "Reviewer", "is_active": true},
+			{"user_id": "e2e-u-activate", "username": "ActivateUser", "is_active": false},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	// Создаем PR
-	prID := fmt.Sprintf("pr_getreview_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "PR for get review",
-		"author_id":         authorID,
+	createResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	reqBody := map[string]interface{}{
+		"user_id":   "e2e-u-activate",
+		"is_active": true,
 	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(200 * time.Millisecond)
 
-	// Получаем ревьюи ревьюера
-	resp, err = http.Get(testServer.URL + "/users/getReview?user_id=" + reviewerID)
-	require.NoError(t, err)
+	resp := makeRequest(t, http.MethodPost, baseURL+"/users/setIsActive", reqBody)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "Expected 200 OK")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var response map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&response)
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	require.Contains(t, response, "user_id", "Response must have user_id")
-	require.Contains(t, response, "pull_requests", "Response must have pull_requests")
+	user, ok := result["user"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, user["is_active"])
+}
 
-	assert.Equal(t, reviewerID, response["user_id"], "user_id must match")
-	assert.IsType(t, []interface{}{}, response["pull_requests"], "pull_requests must be array")
-
-	pullRequests := response["pull_requests"].([]interface{})
-	for _, prRaw := range pullRequests {
-		pr := prRaw.(map[string]interface{})
-		validatePullRequestShort(t, pr)
+func TestUser_GetReview_Success(t *testing.T) {
+	teamReq := map[string]interface{}{
+		"team_name": "e2e-team-review",
+		"members": []map[string]interface{}{
+			{"user_id": "e2e-u-author", "username": "Author", "is_active": true},
+			{"user_id": "e2e-u-reviewer", "username": "Reviewer", "is_active": true},
+		},
 	}
+
+	createTeamResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createTeamResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	prReq := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-review",
+		"pull_request_name": "Review PR",
+		"author_id":         "e2e-u-author",
+	}
+
+	createPrResp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", prReq)
+	createPrResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createPrResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp := makeRequest(t, http.MethodGet, baseURL+"/users/getReview?user_id=e2e-u-reviewer", nil)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+
+	assert.Equal(t, "e2e-u-reviewer", result["user_id"])
+	assert.Contains(t, result, "pull_requests")
+
+	pullRequests, ok := result["pull_requests"].([]interface{})
+	require.True(t, ok)
+	assert.GreaterOrEqual(t, len(pullRequests), 1)
+
+	found := false
+	for _, pr := range pullRequests {
+		prMap, ok := pr.(map[string]interface{})
+		require.True(t, ok)
+		if prMap["pull_request_id"] == "e2e-pr-review" {
+			found = true
+			assert.Equal(t, "Review PR", prMap["pull_request_name"])
+			assert.Equal(t, "e2e-u-author", prMap["author_id"])
+			assert.Contains(t, []interface{}{"OPEN", "MERGED"}, prMap["status"])
+
+			assert.Contains(t, prMap, "pull_request_id")
+			assert.Contains(t, prMap, "pull_request_name")
+			assert.Contains(t, prMap, "author_id")
+			assert.Contains(t, prMap, "status")
+
+			assert.NotContains(t, prMap, "assigned_reviewers")
+			assert.NotContains(t, prMap, "createdAt")
+			assert.NotContains(t, prMap, "mergedAt")
+			break
+		}
+	}
+	assert.True(t, found, "PR should be found in reviewer's list")
+}
+
+func TestUser_GetReview_EmptyList(t *testing.T) {
+	teamReq := map[string]interface{}{
+		"team_name": "e2e-team-empty-review",
+		"members": []map[string]interface{}{
+			{"user_id": "e2e-u-no-reviews", "username": "NoReviews", "is_active": true},
+		},
+	}
+
+	createResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	resp := makeRequest(t, http.MethodGet, baseURL+"/users/getReview?user_id=e2e-u-no-reviews", nil)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+
+	assert.Equal(t, "e2e-u-no-reviews", result["user_id"])
+	pullRequests, ok := result["pull_requests"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, pullRequests, 0)
+}
+
+func TestUser_GetReview_NotFound(t *testing.T) {
+	resp := makeRequest(t, http.MethodGet, baseURL+"/users/getReview?user_id=e2e-nonexistent-reviewer", nil)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	errorResp := parseErrorResponse(t, resp)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "NOT_FOUND", errorObj["code"])
+}
+
+func TestUser_GetReview_MissingUserId(t *testing.T) {
+	resp := makeRequest(t, http.MethodGet, baseURL+"/users/getReview", nil)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }

@@ -14,6 +14,7 @@ type PrService interface {
 	Create(ctx context.Context, req *request.CreateRequest) (*response.CreateResponse, error)
 	Merge(ctx context.Context, req *request.MergeRequest) (*response.MergeResponse, error)
 	Reassign(ctx context.Context, req *request.ReassignRequest) (*response.ReassignResponse, error)
+	GetStats(ctx context.Context) (*response.StatsResponse, error)
 }
 
 type PrHandler struct {

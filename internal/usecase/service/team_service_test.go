@@ -160,4 +160,3 @@ func TestTeamService_Get_TeamNotFound(t *testing.T) {
 	assert.Equal(t, "NOT_FOUND", domainErr.Code)
 	mockRepo.AssertExpectations(t)
 }
-
