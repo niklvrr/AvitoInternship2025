@@ -1,50 +1,38 @@
 package domain
 
-import (
-	"github.com/google/uuid"
-	"time"
-)
+import "time"
 
 type User struct {
-	Id        uuid.UUID
-	Name      string
-	IsActive  bool
-	CreatedAt time.Time
+	Id        string    `json:"user_id"`
+	Name      string    `json:"username"`
+	TeamName  string    `json:"team_name"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"-"`
 }
 
 type Team struct {
-	Id        uuid.UUID
+	Id        string
 	Name      string
 	CreatedAt time.Time
 }
 
 type TeamMember struct {
-	TeamId   uuid.UUID
-	UserId   uuid.UUID
+	TeamId   string
+	UserId   string
 	JoinedAt time.Time
 }
 
-type PrStatus string
-
-var (
-	Open   PrStatus = "open"
-	Merged PrStatus = "merged"
-)
-
 type Pr struct {
-	Id          uuid.UUID
-	Title       string
-	Description string
-	AuthorId    uuid.UUID
-	TeamId      uuid.UUID
-	Status      PrStatus
-	CreatedAt   time.Time
-	MergedAt    time.Time
+	Id        string
+	Name      string
+	AuthorId  string
+	Status    string
+	CreatedAt time.Time
+	MergedAt  *time.Time
 }
 
 type PrReviewer struct {
-	UserId     uuid.UUID
-	PrId       uuid.UUID
-	AssignedBy uuid.UUID
+	UserId     string
+	PrId       string
 	AssignedAt time.Time
 }
