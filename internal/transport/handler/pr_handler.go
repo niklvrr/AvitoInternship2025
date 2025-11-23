@@ -31,9 +31,15 @@ func NewPrHandler(svc PrService, log *zap.Logger) *PrHandler {
 }
 
 func (h *PrHandler) CreatePr(w http.ResponseWriter, r *http.Request) {
+	h.log.Info("createPr request received",
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+	)
+
 	// Парсим json в модель CreateRequest
 	var req request.CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.Error("failed to decode request body", zap.Error(err))
 		statusCode, errResp := transport.HandleError(err)
 		transport.WriteError(w, statusCode, errResp)
 		return
@@ -41,6 +47,11 @@ func (h *PrHandler) CreatePr(w http.ResponseWriter, r *http.Request) {
 
 	// Валидация
 	if req.PrId == "" || req.PrName == "" || req.AuthorId == "" {
+		h.log.Warn("validation failed: required fields are empty",
+			zap.String("pr_id", req.PrId),
+			zap.String("pr_name", req.PrName),
+			zap.String("author_id", req.AuthorId),
+		)
 		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
 		transport.WriteError(w, statusCode, errResp)
 		return
@@ -49,10 +60,20 @@ func (h *PrHandler) CreatePr(w http.ResponseWriter, r *http.Request) {
 	// Вызов сервиса
 	resp, err := h.svc.Create(r.Context(), &req)
 	if err != nil {
+		h.log.Error("failed to create PR",
+			zap.String("pr_id", req.PrId),
+			zap.String("author_id", req.AuthorId),
+			zap.Error(err),
+		)
 		statusCode, errResp := transport.HandleError(err)
 		transport.WriteError(w, statusCode, errResp)
 		return
 	}
+
+	h.log.Info("PR created successfully",
+		zap.String("pr_id", resp.PrId),
+		zap.Strings("assigned_reviewers", resp.AssignedReviewers),
+	)
 
 	// Формируем запрос по openapi
 	response := map[string]interface{}{
@@ -65,9 +86,15 @@ func (h *PrHandler) CreatePr(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PrHandler) MergePr(w http.ResponseWriter, r *http.Request) {
+	h.log.Info("mergePr request received",
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+	)
+
 	// Парсим json в модель MergeRequest
 	var req request.MergeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.Error("failed to decode request body", zap.Error(err))
 		statusCode, errResp := transport.HandleError(err)
 		transport.WriteError(w, statusCode, errResp)
 		return
@@ -75,6 +102,7 @@ func (h *PrHandler) MergePr(w http.ResponseWriter, r *http.Request) {
 
 	// Валидация
 	if req.PrId == "" {
+		h.log.Warn("validation failed: pr_id is empty")
 		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
 		transport.WriteError(w, statusCode, errResp)
 		return
@@ -83,10 +111,19 @@ func (h *PrHandler) MergePr(w http.ResponseWriter, r *http.Request) {
 	// Вызов сервиса
 	resp, err := h.svc.Merge(r.Context(), &req)
 	if err != nil {
+		h.log.Error("failed to merge PR",
+			zap.String("pr_id", req.PrId),
+			zap.Error(err),
+		)
 		statusCode, errResp := transport.HandleError(err)
 		transport.WriteError(w, statusCode, errResp)
 		return
 	}
+
+	h.log.Info("PR merged successfully",
+		zap.String("pr_id", resp.PrId),
+		zap.String("status", resp.Status),
+	)
 
 	// Формируем ответ по формату openapi
 	response := map[string]interface{}{
@@ -99,9 +136,15 @@ func (h *PrHandler) MergePr(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PrHandler) ReassignPr(w http.ResponseWriter, r *http.Request) {
+	h.log.Info("reassignPr request received",
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+	)
+
 	// Парсим json в модель ReassignRequest
 	var req request.ReassignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.Error("failed to decode request body", zap.Error(err))
 		statusCode, errResp := transport.HandleError(err)
 		transport.WriteError(w, statusCode, errResp)
 		return
@@ -109,6 +152,10 @@ func (h *PrHandler) ReassignPr(w http.ResponseWriter, r *http.Request) {
 
 	// Валидация
 	if req.PrId == "" || req.OldUserId == "" {
+		h.log.Warn("validation failed: required fields are empty",
+			zap.String("pr_id", req.PrId),
+			zap.String("old_user_id", req.OldUserId),
+		)
 		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
 		transport.WriteError(w, statusCode, errResp)
 		return
@@ -117,10 +164,20 @@ func (h *PrHandler) ReassignPr(w http.ResponseWriter, r *http.Request) {
 	// Вызов сервиса
 	resp, err := h.svc.Reassign(r.Context(), &req)
 	if err != nil {
+		h.log.Error("failed to reassign PR reviewer",
+			zap.String("pr_id", req.PrId),
+			zap.String("old_user_id", req.OldUserId),
+			zap.Error(err),
+		)
 		statusCode, errResp := transport.HandleError(err)
 		transport.WriteError(w, statusCode, errResp)
 		return
 	}
+
+	h.log.Info("PR reviewer reassigned successfully",
+		zap.String("pr_id", resp.PrId),
+		zap.String("replaced_by", resp.ReplacedBy),
+	)
 
 	// Формируем ответ по формату openapi
 	response := map[string]interface{}{

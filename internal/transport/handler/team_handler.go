@@ -30,9 +30,15 @@ func NewTeamHandler(svc TeamService, log *zap.Logger) *TeamHandler {
 }
 
 func (h *TeamHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
+	h.log.Info("addTeam request received",
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+	)
+
 	// Парсим json в модель AddTeamRequest
 	var req request.AddTeamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.Error("failed to decode request body", zap.Error(err))
 		statusCode, errResp := transport.HandleError(err)
 		transport.WriteError(w, statusCode, errResp)
 		return
@@ -40,6 +46,7 @@ func (h *TeamHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
 
 	// Валидация
 	if req.TeamName == "" {
+		h.log.Warn("validation failed: team_name is empty")
 		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
 		transport.WriteError(w, statusCode, errResp)
 		return
@@ -48,10 +55,20 @@ func (h *TeamHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
 	// Вызов сервиса
 	resp, err := h.svc.Add(r.Context(), &req)
 	if err != nil {
+		h.log.Error("failed to add team",
+			zap.String("team_name", req.TeamName),
+			zap.Int("members_count", len(req.Members)),
+			zap.Error(err),
+		)
 		statusCode, errResp := transport.HandleError(err)
 		transport.WriteError(w, statusCode, errResp)
 		return
 	}
+
+	h.log.Info("team added successfully",
+		zap.String("team_name", resp.TeamName),
+		zap.Int("members_count", len(resp.Members)),
+	)
 
 	// Формируем ответ по формату openapi
 	members := make([]map[string]interface{}, 0, len(resp.Members))
@@ -75,9 +92,15 @@ func (h *TeamHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TeamHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
+	h.log.Info("getTeam request received",
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+	)
+
 	// Получаем team_name из query параметров
 	teamName := r.URL.Query().Get("team_name")
 	if teamName == "" {
+		h.log.Warn("validation failed: team_name query parameter is empty")
 		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
 		transport.WriteError(w, statusCode, errResp)
 		return
@@ -91,10 +114,19 @@ func (h *TeamHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
 	// Вызываем сервис
 	resp, err := h.svc.Get(r.Context(), &req)
 	if err != nil {
+		h.log.Error("failed to get team",
+			zap.String("team_name", teamName),
+			zap.Error(err),
+		)
 		statusCode, errResp := transport.HandleError(err)
 		transport.WriteError(w, statusCode, errResp)
 		return
 	}
+
+	h.log.Info("team retrieved successfully",
+		zap.String("team_name", resp.TeamName),
+		zap.Int("members_count", len(resp.Members)),
+	)
 
 	// Формируем ответ по формату openapi
 	members := make([]map[string]interface{}, 0, len(resp.Members))
