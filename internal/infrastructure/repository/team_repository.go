@@ -158,6 +158,18 @@ func (r *TeamRepository) Add(ctx context.Context, d *dto.AddTeamDTO) (*result.Ad
 func (r *TeamRepository) Get(ctx context.Context, d *dto.GetTeamDTO) (*result.GetTeamResult, error) {
 	r.log.Info("get team started", zap.String("team_name", d.TeamName))
 
+	// Проверяем существование команды
+	var teamId string
+	err := r.db.QueryRow(ctx, teamExistsQuery, d.TeamName).Scan(&teamId)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			r.log.Warn("team not found", zap.String("team_name", d.TeamName))
+			return nil, ErrNotFound
+		}
+		r.log.Error("failed to check team existence", zap.String("team_name", d.TeamName), zap.Error(err))
+		return nil, handleDBError(err)
+	}
+
 	// Чтение команды и всех участников
 	rows, err := r.db.Query(ctx, getTeamQuery, d.TeamName)
 	if err != nil {
