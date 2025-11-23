@@ -24,6 +24,7 @@ var (
 type UserRepository interface {
 	SetIsActive(ctx context.Context, d *dto.SetIsActiveDTO) (*domain.User, error)
 	GetReview(ctx context.Context, d *dto.GetReviewDTO) (*result.GetReviewResult, error)
+	CheckUserExists(ctx context.Context, userId string) (bool, error)
 }
 
 type UserService struct {
@@ -98,6 +99,19 @@ func (s *UserService) GetReview(ctx context.Context, req *request.GetReviewReque
 	userId, err := normalizeID(req.UserId, "user_id")
 	if err != nil {
 		return nil, WrapError(ErrUserNotFound, err)
+	}
+
+	// Проверяем что пользователь существует
+	exists, err := s.repo.CheckUserExists(ctx, userId)
+	if err != nil {
+		s.log.Error("failed to check user existence",
+			zap.String("user_id", userId),
+			zap.Error(err),
+		)
+		return nil, WrapError(ErrUserNotFound, err)
+	}
+	if !exists {
+		return nil, WrapError(ErrUserNotFound, errors.New("user not found"))
 	}
 
 	// Собираем dto

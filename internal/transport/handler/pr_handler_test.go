@@ -46,6 +46,14 @@ func (m *MockPrService) Reassign(ctx context.Context, req *request.ReassignReque
 	return args.Get(0).(*response.ReassignResponse), args.Error(1)
 }
 
+func (m *MockPrService) GetStats(ctx context.Context) (*response.StatsResponse, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*response.StatsResponse), args.Error(1)
+}
+
 func TestPrHandler_CreatePr_Success(t *testing.T) {
 	logger := zap.NewNop()
 	mockService := new(MockPrService)
@@ -283,6 +291,91 @@ func TestPrHandler_ReassignPr_PrMerged(t *testing.T) {
 	handler.ReassignPr(w, req)
 
 	assert.Equal(t, http.StatusConflict, w.Code)
+	var result map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	assert.Contains(t, result, "error")
+	mockService.AssertExpectations(t)
+}
+
+func TestPrHandler_ReassignPr_NotAssigned(t *testing.T) {
+	logger := zap.NewNop()
+	mockService := new(MockPrService)
+	handler := NewPrHandler(mockService, logger)
+
+	reqBody := request.ReassignRequest{
+		PrId:      "pr1",
+		OldUserId: "old_reviewer",
+	}
+
+	mockService.On("Reassign", mock.Anything, mock.Anything).Return(nil, service.WrapError(service.ErrReviewerNotAssigned, nil))
+
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/pullRequest/reassign", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ReassignPr(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	var result map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	assert.Contains(t, result, "error")
+	errorObj := result["error"].(map[string]interface{})
+	assert.Equal(t, "NOT_ASSIGNED", errorObj["code"])
+	mockService.AssertExpectations(t)
+}
+
+func TestPrHandler_ReassignPr_NoCandidate(t *testing.T) {
+	logger := zap.NewNop()
+	mockService := new(MockPrService)
+	handler := NewPrHandler(mockService, logger)
+
+	reqBody := request.ReassignRequest{
+		PrId:      "pr1",
+		OldUserId: "old_reviewer",
+	}
+
+	mockService.On("Reassign", mock.Anything, mock.Anything).Return(nil, service.ErrNoCandidate)
+
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/pullRequest/reassign", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ReassignPr(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	var result map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	assert.Contains(t, result, "error")
+	errorObj := result["error"].(map[string]interface{})
+	assert.Equal(t, "NO_CANDIDATE", errorObj["code"])
+	mockService.AssertExpectations(t)
+}
+
+func TestPrHandler_ReassignPr_NotFound(t *testing.T) {
+	logger := zap.NewNop()
+	mockService := new(MockPrService)
+	handler := NewPrHandler(mockService, logger)
+
+	reqBody := request.ReassignRequest{
+		PrId:      "pr1",
+		OldUserId: "old_reviewer",
+	}
+
+	mockService.On("Reassign", mock.Anything, mock.Anything).Return(nil, service.WrapError(service.ErrPrNotFound, nil))
+
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/pullRequest/reassign", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ReassignPr(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
 	var result map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &result)
 	assert.NoError(t, err)

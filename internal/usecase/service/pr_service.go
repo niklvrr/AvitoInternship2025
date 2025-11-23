@@ -36,6 +36,9 @@ type PrRepository interface {
 	Merge(ctx context.Context, dto *dto.MergePrDTO) (*result.PrResult, error)
 	Reassign(ctx context.Context, dto *dto.ReassignPrDTO) (*result.ReassignResult, error)
 	SelectPotentialReviewers(ctx context.Context, userId string) ([]*domain.User, error)
+	CheckReviewerAssigned(ctx context.Context, prId, reviewerId string) (bool, error)
+	CheckReviewerAssignedWithPR(ctx context.Context, prId, reviewerId string) (bool, string, error)
+	GetStats(ctx context.Context) (*result.StatsResult, error)
 }
 
 type PrService struct {
@@ -205,6 +208,21 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		zap.String("old_user_id", oldReviewerId),
 	)
 
+	// Проверяем что ревьюер назначен на PR и получаем информацию о PR
+	isAssigned, prAuthorId, err := s.repo.CheckReviewerAssignedWithPR(ctx, prId, oldReviewerId)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+		if errors.Is(err, repository.ErrPrMergedStatus) {
+			return nil, WrapError(ErrPrMerged, err)
+		}
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
+	}
+	if !isAssigned {
+		return nil, WrapError(ErrReviewerNotAssigned, errors.New("reviewer is not assigned to this PR"))
+	}
+
 	// Читаем всех членов команды старого ревьюера
 	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, oldReviewerId)
 	if err != nil {
@@ -222,8 +240,8 @@ func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) 
 		return nil, fmt.Errorf("%w: %w", reassignError, err)
 	}
 
-	// Ищем нового активного ревьюера, исключая старого
-	newReviewer, err := findReviewers(potentialReviewers, oldReviewerId, reviewerCountForReassign)
+	// Ищем нового активного ревьюера, исключая старого и автора PR
+	newReviewer, err := findReviewersExcludingAuthor(potentialReviewers, oldReviewerId, prAuthorId, reviewerCountForReassign)
 	if err != nil {
 		s.log.Warn("no replacement reviewer available",
 			zap.String("pr_id", prId),
@@ -327,6 +345,48 @@ func findReviewers(potentialReviewers []*domain.User, excludedId string, reviewe
 	return result, nil
 }
 
+func findReviewersExcludingAuthor(potentialReviewers []*domain.User, excludedId, authorId string, reviewerCount int) ([]string, error) {
+	var reviewers []*domain.User
+	for _, potentialReviewer := range potentialReviewers {
+		if potentialReviewer == nil {
+			continue
+		}
+
+		if potentialReviewer.Id == excludedId {
+			continue
+		}
+
+		if potentialReviewer.Id == authorId {
+			continue
+		}
+
+		if potentialReviewer.IsActive == false {
+			continue
+		}
+
+		reviewers = append(reviewers, potentialReviewer)
+	}
+
+	if len(reviewers) == 0 {
+		return nil, noPotentialReviewerError
+	}
+
+	rand.New(rand.NewSource(time.Now().UnixNano())).Shuffle(len(reviewers), func(i, j int) {
+		reviewers[i], reviewers[j] = reviewers[j], reviewers[i]
+	})
+
+	if len(reviewers) < reviewerCount {
+		reviewerCount = len(reviewers)
+	}
+
+	result := make([]string, 0, reviewerCount)
+	for i := 0; i < reviewerCount; i++ {
+		result = append(result, reviewers[i].Id)
+	}
+
+	return result, nil
+}
+
 func formatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
@@ -337,6 +397,45 @@ func formatTimePtr(t *time.Time) *string {
 	}
 	formatted := formatTime(*t)
 	return &formatted
+}
+
+func (s *PrService) GetStats(ctx context.Context) (*response.StatsResponse, error) {
+	s.log.Info("get statistics request accepted")
+
+	stats, err := s.repo.GetStats(ctx)
+	if err != nil {
+		s.log.Error("failed to get statistics", zap.Error(err))
+		return nil, err
+	}
+
+	// Преобразуем результат репозитория в ответ
+	users := make([]response.UserStat, 0, len(stats.Users))
+	for _, u := range stats.Users {
+		users = append(users, response.UserStat{
+			UserId:      u.UserId,
+			Username:    u.Username,
+			Assignments: u.Assignments,
+		})
+	}
+
+	prs := make([]response.PrStat, 0, len(stats.PRs))
+	for _, p := range stats.PRs {
+		prs = append(prs, response.PrStat{
+			PrId:           p.PrId,
+			PrName:         p.PrName,
+			ReviewersCount: p.ReviewersCount,
+		})
+	}
+
+	s.log.Info("statistics retrieved",
+		zap.Int("users_count", len(users)),
+		zap.Int("prs_count", len(prs)),
+	)
+
+	return &response.StatsResponse{
+		Users: users,
+		PRs:   prs,
+	}, nil
 }
 
 func normalizeID(raw, field string) (string, error) {

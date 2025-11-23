@@ -53,6 +53,96 @@ func (m *MockPrRepository) SelectPotentialReviewers(ctx context.Context, userId 
 	return args.Get(0).([]*domain.User), args.Error(1)
 }
 
+func (m *MockPrRepository) GetStats(ctx context.Context) (*result.StatsResult, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*result.StatsResult), args.Error(1)
+}
+
+func (m *MockPrRepository) CheckReviewerAssigned(ctx context.Context, prId, reviewerId string) (bool, error) {
+	args := m.Called(ctx, prId, reviewerId)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockPrRepository) CheckReviewerAssignedWithPR(ctx context.Context, prId, reviewerId string) (bool, string, error) {
+	args := m.Called(ctx, prId, reviewerId)
+	return args.Bool(0), args.String(1), args.Error(2)
+}
+
+func TestPrService_GetStats_Success(t *testing.T) {
+	logger := zap.NewNop()
+	mockRepo := new(MockPrRepository)
+	service := NewPrService(mockRepo, logger)
+
+	expectedStats := &result.StatsResult{
+		Users: []result.UserStats{
+			{UserId: "u1", Username: "Alice", Assignments: 5},
+			{UserId: "u2", Username: "Bob", Assignments: 3},
+			{UserId: "u3", Username: "Charlie", Assignments: 0},
+		},
+		PRs: []result.PrStats{
+			{PrId: "pr1", PrName: "PR 1", ReviewersCount: 2},
+			{PrId: "pr2", PrName: "PR 2", ReviewersCount: 1},
+			{PrId: "pr3", PrName: "PR 3", ReviewersCount: 0},
+		},
+	}
+
+	mockRepo.On("GetStats", mock.Anything).Return(expectedStats, nil)
+
+	resp, err := service.GetStats(context.Background())
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Len(t, resp.Users, 3)
+	assert.Len(t, resp.PRs, 3)
+	assert.Equal(t, "u1", resp.Users[0].UserId)
+	assert.Equal(t, "Alice", resp.Users[0].Username)
+	assert.Equal(t, 5, resp.Users[0].Assignments)
+	assert.Equal(t, "pr1", resp.PRs[0].PrId)
+	assert.Equal(t, "PR 1", resp.PRs[0].PrName)
+	assert.Equal(t, 2, resp.PRs[0].ReviewersCount)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestPrService_GetStats_EmptyStats(t *testing.T) {
+	logger := zap.NewNop()
+	mockRepo := new(MockPrRepository)
+	service := NewPrService(mockRepo, logger)
+
+	expectedStats := &result.StatsResult{
+		Users: []result.UserStats{},
+		PRs:   []result.PrStats{},
+	}
+
+	mockRepo.On("GetStats", mock.Anything).Return(expectedStats, nil)
+
+	resp, err := service.GetStats(context.Background())
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Len(t, resp.Users, 0)
+	assert.Len(t, resp.PRs, 0)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestPrService_GetStats_RepositoryError(t *testing.T) {
+	logger := zap.NewNop()
+	mockRepo := new(MockPrRepository)
+	service := NewPrService(mockRepo, logger)
+
+	expectedError := errors.New("database error")
+	mockRepo.On("GetStats", mock.Anything).Return(nil, expectedError)
+
+	resp, err := service.GetStats(context.Background())
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Equal(t, expectedError, err)
+	mockRepo.AssertExpectations(t)
+}
+
 func TestPrService_Create_Success(t *testing.T) {
 	logger := zap.NewNop()
 	mockRepo := new(MockPrRepository)
@@ -295,6 +385,7 @@ func TestPrService_Reassign_Success(t *testing.T) {
 		ReplacedBy: "new_reviewer",
 	}
 
+	mockRepo.On("CheckReviewerAssignedWithPR", mock.Anything, "pr1", "old_reviewer").Return(true, "author1", nil)
 	mockRepo.On("SelectPotentialReviewers", mock.Anything, "old_reviewer").Return(potentialReviewers, nil)
 	mockRepo.On("Reassign", mock.Anything, mock.MatchedBy(func(d *dto.ReassignPrDTO) bool {
 		return d.PrId == "pr1" && d.OldReviewerId == "old_reviewer" && d.ReplacedBy == "new_reviewer"
@@ -319,12 +410,7 @@ func TestPrService_Reassign_PrMerged(t *testing.T) {
 		OldUserId: "old_reviewer",
 	}
 
-	potentialReviewers := []*domain.User{
-		{Id: "new_reviewer", Name: "New Reviewer", IsActive: true},
-	}
-
-	mockRepo.On("SelectPotentialReviewers", mock.Anything, "old_reviewer").Return(potentialReviewers, nil)
-	mockRepo.On("Reassign", mock.Anything, mock.Anything).Return(nil, repository.ErrPrMergedStatus)
+	mockRepo.On("CheckReviewerAssignedWithPR", mock.Anything, "pr1", "old_reviewer").Return(false, "", repository.ErrPrMergedStatus)
 
 	resp, err := service.Reassign(context.Background(), req)
 
@@ -333,6 +419,50 @@ func TestPrService_Reassign_PrMerged(t *testing.T) {
 	var domainErr *DomainError
 	assert.ErrorAs(t, err, &domainErr)
 	assert.Equal(t, "PR_MERGED", domainErr.Code)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestPrService_Reassign_ReviewerNotAssigned(t *testing.T) {
+	logger := zap.NewNop()
+	mockRepo := new(MockPrRepository)
+	service := NewPrService(mockRepo, logger)
+
+	req := &request.ReassignRequest{
+		PrId:      "pr1",
+		OldUserId: "old_reviewer",
+	}
+
+	mockRepo.On("CheckReviewerAssignedWithPR", mock.Anything, "pr1", "old_reviewer").Return(false, "author1", nil)
+
+	resp, err := service.Reassign(context.Background(), req)
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	var domainErr *DomainError
+	assert.ErrorAs(t, err, &domainErr)
+	assert.Equal(t, "NOT_ASSIGNED", domainErr.Code)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestPrService_Reassign_PrNotFound(t *testing.T) {
+	logger := zap.NewNop()
+	mockRepo := new(MockPrRepository)
+	service := NewPrService(mockRepo, logger)
+
+	req := &request.ReassignRequest{
+		PrId:      "pr1",
+		OldUserId: "old_reviewer",
+	}
+
+	mockRepo.On("CheckReviewerAssignedWithPR", mock.Anything, "pr1", "old_reviewer").Return(false, "", repository.ErrNotFound)
+
+	resp, err := service.Reassign(context.Background(), req)
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	var domainErr *DomainError
+	assert.ErrorAs(t, err, &domainErr)
+	assert.Equal(t, "NOT_FOUND", domainErr.Code)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -346,18 +476,22 @@ func TestPrService_Reassign_NoCandidate(t *testing.T) {
 		OldUserId: "old_reviewer",
 	}
 
-	// Только неактивные ревьюеры или только старый ревьюер
+	// Только неактивные ревьюеры или только старый ревьюер и автор
 	potentialReviewers := []*domain.User{
 		{Id: "old_reviewer", Name: "Old Reviewer", IsActive: true},
+		{Id: "author1", Name: "Author", IsActive: true},
 	}
 
+	mockRepo.On("CheckReviewerAssignedWithPR", mock.Anything, "pr1", "old_reviewer").Return(true, "author1", nil)
 	mockRepo.On("SelectPotentialReviewers", mock.Anything, "old_reviewer").Return(potentialReviewers, nil)
 
 	resp, err := service.Reassign(context.Background(), req)
 
 	assert.Error(t, err)
 	assert.Nil(t, resp)
-	assert.Equal(t, ErrNoCandidate, err)
+	var domainErr *DomainError
+	assert.ErrorAs(t, err, &domainErr)
+	assert.Equal(t, "NO_CANDIDATE", domainErr.Code)
 	mockRepo.AssertExpectations(t)
 }
 

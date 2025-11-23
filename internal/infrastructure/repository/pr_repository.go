@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -52,6 +53,30 @@ WHERE pr_id = $1 AND user_id = $2;`
 	selectPrReviewerQuery = `
 SELECT user_id FROM pr_reviewers
 WHERE pr_id = $1;`
+
+	checkReviewerAssignedQuery = `
+SELECT 1 FROM pr_reviewers
+WHERE pr_id = $1 AND user_id = $2;`
+
+	selectUserStatsQuery = `
+SELECT 
+    u.id,
+    u.name,
+    COUNT(pr.user_id) as assignments_count
+FROM users u
+LEFT JOIN pr_reviewers pr ON pr.user_id = u.id
+GROUP BY u.id, u.name
+ORDER BY assignments_count DESC, u.name;`
+
+	selectPrStatsQuery = `
+SELECT 
+    p.id,
+    p.name,
+    COUNT(pr.user_id) as reviewers_count
+FROM prs p
+LEFT JOIN pr_reviewers pr ON pr.pr_id = p.id
+GROUP BY p.id, p.name
+ORDER BY reviewers_count DESC, p.name;`
 
 	selectPrQuery = `
 SELECT id, name, author_id, status, created_at, merged_at FROM prs
@@ -256,9 +281,11 @@ func (r *PrRepository) Reassign(ctx context.Context, d *dto.ReassignPrDTO) (*res
 		return nil, ErrReviewerNotAssigned
 	}
 
-	// Добавить нового ревьюера
-	if _, err := tx.Exec(ctx, insertPrReviewerQuery, d.ReplacedBy, d.PrId); err != nil {
-		return nil, handleDBError(err)
+	// Добавить нового ревьюера (только если указан)
+	if d.ReplacedBy != "" {
+		if _, err := tx.Exec(ctx, insertPrReviewerQuery, d.ReplacedBy, d.PrId); err != nil {
+			return nil, handleDBError(err)
+		}
 	}
 
 	// Чтение всех ревьюеров для этого pr
@@ -342,6 +369,79 @@ func (r *PrRepository) SelectPotentialReviewers(ctx context.Context, userId stri
 	return users, nil
 }
 
+func (r *PrRepository) CheckReviewerAssigned(ctx context.Context, prId, reviewerId string) (bool, error) {
+	r.log.Debug("check reviewer assigned",
+		zap.String("pr_id", prId),
+		zap.String("reviewer_id", reviewerId),
+	)
+
+	// Проверяем что PR существует
+	_, err := readPr(ctx, r.db, prId)
+	if err != nil {
+		r.log.Error("failed to load PR for reviewer check",
+			zap.String("pr_id", prId),
+			zap.Error(err),
+		)
+		return false, handleDBError(err)
+	}
+
+	// Проверяем что ревьюер назначен на PR
+	var exists int
+	err = r.db.QueryRow(ctx, checkReviewerAssignedQuery, prId, reviewerId).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		r.log.Error("failed to check reviewer assignment",
+			zap.String("pr_id", prId),
+			zap.String("reviewer_id", reviewerId),
+			zap.Error(err),
+		)
+		return false, handleDBError(err)
+	}
+
+	return true, nil
+}
+
+func (r *PrRepository) CheckReviewerAssignedWithPR(ctx context.Context, prId, reviewerId string) (bool, string, error) {
+	r.log.Debug("check reviewer assigned with PR",
+		zap.String("pr_id", prId),
+		zap.String("reviewer_id", reviewerId),
+	)
+
+	// Проверяем что PR существует и получаем authorId
+	prRes, err := readPr(ctx, r.db, prId)
+	if err != nil {
+		r.log.Error("failed to load PR for reviewer check",
+			zap.String("pr_id", prId),
+			zap.Error(err),
+		)
+		return false, "", handleDBError(err)
+	}
+
+	// Не даем переназначать ревьюеров после MERGED
+	if prRes.Status == "MERGED" {
+		return false, "", ErrPrMergedStatus
+	}
+
+	// Проверяем что ревьюер назначен на PR
+	var exists int
+	err = r.db.QueryRow(ctx, checkReviewerAssignedQuery, prId, reviewerId).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, prRes.AuthorId, nil
+		}
+		r.log.Error("failed to check reviewer assignment",
+			zap.String("pr_id", prId),
+			zap.String("reviewer_id", reviewerId),
+			zap.Error(err),
+		)
+		return false, "", handleDBError(err)
+	}
+
+	return true, prRes.AuthorId, nil
+}
+
 type queryExecutor interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -386,4 +486,64 @@ func readPr(ctx context.Context, exec queryExecutor, prId string) (*result.PrRes
 	}
 
 	return prRes, nil
+}
+
+func (r *PrRepository) GetStats(ctx context.Context) (*result.StatsResult, error) {
+	r.log.Debug("getting statistics")
+
+	stats := &result.StatsResult{
+		Users: make([]result.UserStats, 0),
+		PRs:   make([]result.PrStats, 0),
+	}
+
+	// Получаем статистику по пользователям
+	userRows, err := r.db.Query(ctx, selectUserStatsQuery)
+	if err != nil {
+		r.log.Error("failed to get user statistics", zap.Error(err))
+		return nil, handleDBError(err)
+	}
+	defer userRows.Close()
+
+	for userRows.Next() {
+		var userStat result.UserStats
+		if err := userRows.Scan(&userStat.UserId, &userStat.Username, &userStat.Assignments); err != nil {
+			r.log.Error("failed to scan user statistics", zap.Error(err))
+			return nil, handleDBError(err)
+		}
+		stats.Users = append(stats.Users, userStat)
+	}
+
+	if err := userRows.Err(); err != nil {
+		r.log.Error("error iterating user statistics", zap.Error(err))
+		return nil, handleDBError(err)
+	}
+
+	// Получаем статистику по PR
+	prRows, err := r.db.Query(ctx, selectPrStatsQuery)
+	if err != nil {
+		r.log.Error("failed to get PR statistics", zap.Error(err))
+		return nil, handleDBError(err)
+	}
+	defer prRows.Close()
+
+	for prRows.Next() {
+		var prStat result.PrStats
+		if err := prRows.Scan(&prStat.PrId, &prStat.PrName, &prStat.ReviewersCount); err != nil {
+			r.log.Error("failed to scan PR statistics", zap.Error(err))
+			return nil, handleDBError(err)
+		}
+		stats.PRs = append(stats.PRs, prStat)
+	}
+
+	if err := prRows.Err(); err != nil {
+		r.log.Error("error iterating PR statistics", zap.Error(err))
+		return nil, handleDBError(err)
+	}
+
+	r.log.Info("statistics retrieved",
+		zap.Int("users_count", len(stats.Users)),
+		zap.Int("prs_count", len(stats.PRs)),
+	)
+
+	return stats, nil
 }

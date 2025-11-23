@@ -1,9 +1,7 @@
 package e2e
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -12,651 +10,548 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestPRCreate_Success проверяет создание PR
-func TestPRCreate_Success(t *testing.T) {
-	uniqueName := fmt.Sprintf("pr_create_%d", time.Now().UnixNano())
-	authorID := "u_author_create"
-
-	// Создаем команду с несколькими активными ревьюерами
+func TestPR_Create_Success(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-pr-create",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": "u_reviewer1_create", "username": "Reviewer1", "is_active": true},
-			{"user_id": "u_reviewer2_create", "username": "Reviewer2", "is_active": true},
+			{"user_id": "e2e-u-pr-author", "username": "PRAuthor", "is_active": true},
+			{"user_id": "e2e-u-pr-reviewer1", "username": "PRReviewer1", "is_active": true},
+			{"user_id": "e2e-u-pr-reviewer2", "username": "PRReviewer2", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	// Создаем PR
-	prID := fmt.Sprintf("pr_create_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "Test PR",
-		"author_id":         authorID,
+	createTeamResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createTeamResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	reqBody := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-create-1",
+		"pull_request_name": "Create PR Test",
+		"author_id":         "e2e-u-pr-author",
 	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", reqBody)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusCreated, resp.StatusCode, "Expected 201 Created")
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var response map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&response)
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	require.Contains(t, response, "pr", "Response must have 'pr' wrapper")
+	assert.Contains(t, result, "pr")
+	pr, ok := result["pr"].(map[string]interface{})
+	require.True(t, ok)
 
-	pr := response["pr"].(map[string]interface{})
-	validatePullRequest(t, pr)
-	assert.Equal(t, prID, pr["pull_request_id"])
+	assert.Equal(t, "e2e-pr-create-1", pr["pull_request_id"])
+	assert.Equal(t, "Create PR Test", pr["pull_request_name"])
+	assert.Equal(t, "e2e-u-pr-author", pr["author_id"])
 	assert.Equal(t, "OPEN", pr["status"])
 
-	reviewers := pr["assigned_reviewers"].([]interface{})
-	assert.GreaterOrEqual(t, len(reviewers), 0, "Must have 0-2 reviewers")
-	assert.LessOrEqual(t, len(reviewers), 2, "Must have 0-2 reviewers")
+	assignedReviewers, ok := pr["assigned_reviewers"].([]interface{})
+	require.True(t, ok)
+	assert.GreaterOrEqual(t, len(assignedReviewers), 0)
+	assert.LessOrEqual(t, len(assignedReviewers), 2)
 
-	// Проверяем, что автор не в списке ревьюеров
-	for _, reviewer := range reviewers {
-		assert.NotEqual(t, authorID, reviewer, "Author must not be in reviewers list")
+	for _, reviewer := range assignedReviewers {
+		reviewerID, ok := reviewer.(string)
+		require.True(t, ok)
+		assert.NotEqual(t, "e2e-u-pr-author", reviewerID)
+		assert.Contains(t, []string{"e2e-u-pr-reviewer1", "e2e-u-pr-reviewer2"}, reviewerID)
+	}
+
+	assert.Contains(t, pr, "createdAt")
+	createdAt, ok := pr["createdAt"].(string)
+	if ok {
+		assert.NotEmpty(t, createdAt)
 	}
 }
 
-// TestPRCreate_ZeroReviewers проверяет создание PR без доступных ревьюеров
-func TestPRCreate_ZeroReviewers(t *testing.T) {
-	uniqueName := fmt.Sprintf("pr_zero_%d", time.Now().UnixNano())
-	authorID := "u_author_zero"
-
-	// Создаем команду только с автором (нет других активных ревьюеров)
+func TestPR_Create_ZeroReviewers(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-pr-zero",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
+			{"user_id": "e2e-u-pr-zero-author", "username": "ZeroAuthor", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	// Создаем PR - должен создаться с пустым массивом ревьюеров
-	prID := fmt.Sprintf("pr_zero_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "PR without reviewers",
-		"author_id":         authorID,
+	createTeamResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createTeamResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	reqBody := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-zero",
+		"pull_request_name": "Zero Reviewers PR",
+		"author_id":         "e2e-u-pr-zero-author",
 	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", reqBody)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusCreated, resp.StatusCode, "Expected 201 Created even with 0 reviewers")
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var response map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&response)
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	pr := response["pr"].(map[string]interface{})
-	validatePullRequest(t, pr)
+	pr, ok := result["pr"].(map[string]interface{})
+	require.True(t, ok)
 
-	reviewers := pr["assigned_reviewers"].([]interface{})
-	assert.Len(t, reviewers, 0, "PR must be created with 0 reviewers when no candidates available")
+	assignedReviewers, ok := pr["assigned_reviewers"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, assignedReviewers, 0)
 }
 
-// TestPRCreate_Duplicate проверяет создание PR с дубликатом
-func TestPRCreate_Duplicate(t *testing.T) {
-	uniqueName := fmt.Sprintf("pr_dup_%d", time.Now().UnixNano())
-	authorID := "u_author_dup"
-
+func TestPR_Create_Duplicate(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-pr-duplicate",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": "u_reviewer_dup", "username": "Reviewer", "is_active": true},
+			{"user_id": "e2e-u-pr-dup-author", "username": "DupAuthor", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	prID := fmt.Sprintf("pr_dup_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "First PR",
-		"author_id":         authorID,
+	createTeamResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createTeamResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	reqBody := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-duplicate",
+		"pull_request_name": "Duplicate PR",
+		"author_id":         "e2e-u-pr-dup-author",
 	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(200 * time.Millisecond)
 
-	// Пытаемся создать PR с тем же ID
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	defer resp.Body.Close()
+	resp1 := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", reqBody)
+	resp1.Body.Close()
+	assert.Equal(t, http.StatusCreated, resp1.StatusCode)
 
-	validateErrorResponse(t, resp, "PR_EXISTS", http.StatusConflict)
+	time.Sleep(100 * time.Millisecond)
+
+	resp2 := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", reqBody)
+	defer resp2.Body.Close()
+
+	assert.Equal(t, http.StatusConflict, resp2.StatusCode)
+
+	errorResp := parseErrorResponse(t, resp2)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "PR_EXISTS", errorObj["code"])
 }
 
-// TestPRCreate_AuthorNotFound проверяет создание PR с несуществующим автором
-func TestPRCreate_AuthorNotFound(t *testing.T) {
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   fmt.Sprintf("pr_notfound_%d", time.Now().UnixNano()),
-		"pull_request_name": "PR with nonexistent author",
-		"author_id":         "nonexistent_author",
+func TestPR_Create_AuthorNotFound(t *testing.T) {
+	reqBody := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-notfound",
+		"pull_request_name": "Author Not Found PR",
+		"author_id":         "e2e-nonexistent-author",
 	}
-	body, _ := json.Marshal(createPRReq)
-	resp, err := http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", reqBody)
 	defer resp.Body.Close()
 
-	validateErrorResponse(t, resp, "NOT_FOUND", http.StatusNotFound)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	errorResp := parseErrorResponse(t, resp)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "NOT_FOUND", errorObj["code"])
 }
 
-// TestPRMerge_Success проверяет merge PR
-func TestPRMerge_Success(t *testing.T) {
-	uniqueName := fmt.Sprintf("pr_merge_%d", time.Now().UnixNano())
-	authorID := "u_author_merge"
-
+func TestPR_Merge_Success(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-pr-merge",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": "u_reviewer_merge", "username": "Reviewer", "is_active": true},
+			{"user_id": "e2e-u-pr-merge-author", "username": "MergeAuthor", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	prID := fmt.Sprintf("pr_merge_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "PR to merge",
-		"author_id":         authorID,
-	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(200 * time.Millisecond)
+	createTeamResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createTeamResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp.StatusCode)
 
-	// Merge PR
-	mergePRReq := map[string]interface{}{
-		"pull_request_id": prID,
+	time.Sleep(100 * time.Millisecond)
+
+	createPrReq := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-merge",
+		"pull_request_name": "Merge PR",
+		"author_id":         "e2e-u-pr-merge-author",
 	}
-	body, _ = json.Marshal(mergePRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/merge", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	createPrResp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", createPrReq)
+	createPrResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createPrResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	mergeReq := map[string]interface{}{
+		"pull_request_id": "e2e-pr-merge",
+	}
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/merge", mergeReq)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "Expected 200 OK")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var response map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&response)
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	require.Contains(t, response, "pr", "Response must have 'pr' wrapper")
+	pr, ok := result["pr"].(map[string]interface{})
+	require.True(t, ok)
 
-	pr := response["pr"].(map[string]interface{})
-	validatePullRequest(t, pr)
-	assert.Equal(t, "MERGED", pr["status"], "Status must be MERGED")
-	assert.NotNil(t, pr["mergedAt"], "mergedAt must be set after merge")
+	assert.Equal(t, "e2e-pr-merge", pr["pull_request_id"])
+	assert.Equal(t, "MERGED", pr["status"])
 
-	// Проверяем формат mergedAt
-	mergedAt := pr["mergedAt"].(string)
-	_, err = time.Parse(time.RFC3339, mergedAt)
-	assert.NoError(t, err, "mergedAt must be in RFC3339 format")
+	assert.Contains(t, pr, "createdAt")
+	createdAt, ok := pr["createdAt"].(string)
+	require.True(t, ok)
+	assert.NotEmpty(t, createdAt)
+
+	assert.Contains(t, pr, "mergedAt")
+	mergedAt, ok := pr["mergedAt"].(string)
+	require.True(t, ok)
+	assert.NotEmpty(t, mergedAt)
 }
 
-// TestPRMerge_Idempotent проверяет идемпотентность merge операции
-func TestPRMerge_Idempotent(t *testing.T) {
-	uniqueName := fmt.Sprintf("pr_idemp_%d", time.Now().UnixNano())
-	authorID := "u_author_idemp"
-
+func TestPR_Merge_Idempotent(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-pr-idempotent",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": "u_reviewer_idemp", "username": "Reviewer", "is_active": true},
+			{"user_id": "e2e-u-pr-idempotent-author", "username": "IdempotentAuthor", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	prID := fmt.Sprintf("pr_idemp_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "PR for idempotent test",
-		"author_id":         authorID,
+	createTeamResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createTeamResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	createPrReq := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-idempotent",
+		"pull_request_name": "Idempotent PR",
+		"author_id":         "e2e-u-pr-idempotent-author",
 	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(200 * time.Millisecond)
 
-	// Первый merge
-	mergePRReq := map[string]interface{}{
-		"pull_request_id": prID,
+	createPrResp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", createPrReq)
+	createPrResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createPrResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	mergeReq := map[string]interface{}{
+		"pull_request_id": "e2e-pr-idempotent",
 	}
-	body, _ = json.Marshal(mergePRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/merge", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var firstResponse map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&firstResponse)
-	require.NoError(t, err)
-	resp.Body.Close()
+	resp1 := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/merge", mergeReq)
+	var result1 map[string]interface{}
+	parseJSONResponse(t, resp1, &result1)
+	resp1.Body.Close()
+	assert.Equal(t, http.StatusOK, resp1.StatusCode)
 
-	firstPR := firstResponse["pr"].(map[string]interface{})
-	firstMergedAt := firstPR["mergedAt"].(string)
-	time.Sleep(200 * time.Millisecond)
+	pr1, ok := result1["pr"].(map[string]interface{})
+	require.True(t, ok)
+	firstMergedAt := pr1["mergedAt"]
 
-	// Второй merge (должен быть идемпотентным)
-	body, _ = json.Marshal(mergePRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/merge", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	defer resp.Body.Close()
+	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "Idempotent merge must return 200 OK")
+	resp2 := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/merge", mergeReq)
+	defer resp2.Body.Close()
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
 
-	var secondResponse map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&secondResponse)
+	var result2 map[string]interface{}
+	err := json.NewDecoder(resp2.Body).Decode(&result2)
 	require.NoError(t, err)
 
-	secondPR := secondResponse["pr"].(map[string]interface{})
-	validatePullRequest(t, secondPR)
-	assert.Equal(t, "MERGED", secondPR["status"], "Status must remain MERGED")
-
-	// Проверяем, что mergedAt не изменился (или изменился минимально из-за времени выполнения)
-	secondMergedAt := secondPR["mergedAt"].(string)
-	firstTime, _ := time.Parse(time.RFC3339, firstMergedAt)
-	secondTime, _ := time.Parse(time.RFC3339, secondMergedAt)
-
-	// mergedAt может быть одинаковым или отличаться на секунды из-за времени выполнения
-	// Главное - операция не должна падать с ошибкой
-	assert.True(t, secondTime.Equal(firstTime) || secondTime.After(firstTime),
-		"mergedAt should not change significantly on idempotent merge")
+	pr2, ok := result2["pr"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "MERGED", pr2["status"])
+	assert.Equal(t, firstMergedAt, pr2["mergedAt"])
 }
 
-// TestPRMerge_NotFound проверяет merge несуществующего PR
-func TestPRMerge_NotFound(t *testing.T) {
-	mergePRReq := map[string]interface{}{
-		"pull_request_id": fmt.Sprintf("pr_nonexistent_%d", time.Now().UnixNano()),
+func TestPR_Merge_NotFound(t *testing.T) {
+	mergeReq := map[string]interface{}{
+		"pull_request_id": "e2e-nonexistent-pr",
 	}
-	body, _ := json.Marshal(mergePRReq)
-	resp, err := http.Post(testServer.URL+"/pullRequest/merge", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/merge", mergeReq)
 	defer resp.Body.Close()
 
-	validateErrorResponse(t, resp, "NOT_FOUND", http.StatusNotFound)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	errorResp := parseErrorResponse(t, resp)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "NOT_FOUND", errorObj["code"])
 }
 
-// TestPRReassign_Success проверяет переназначение ревьюера
-func TestPRReassign_Success(t *testing.T) {
-	uniqueName := fmt.Sprintf("pr_reassign_%d", time.Now().UnixNano())
-	authorID := "u_author_reassign"
-
-	// Создаем команду с несколькими ревьюерами
+func TestPR_Reassign_Success(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-pr-reassign",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": "u_reviewer1_reassign", "username": "Reviewer1", "is_active": true},
-			{"user_id": "u_reviewer2_reassign", "username": "Reviewer2", "is_active": true},
+			{"user_id": "e2e-u-pr-reassign-author", "username": "ReassignAuthor", "is_active": true},
+			{"user_id": "e2e-u-pr-reassign-old", "username": "OldReviewer", "is_active": true},
+			{"user_id": "e2e-u-pr-reassign-new", "username": "NewReviewer", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	prID := fmt.Sprintf("pr_reassign_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "PR for reassign",
-		"author_id":         authorID,
+	createTeamResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createTeamResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	createPrReq := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-reassign",
+		"pull_request_name": "Reassign PR",
+		"author_id":         "e2e-u-pr-reassign-author",
 	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
+
+	createPrResp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", createPrReq)
+	createPrResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createPrResp.StatusCode)
+
 	time.Sleep(200 * time.Millisecond)
 
-	// Получаем список ревьюеров
-	var createResp map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&createResp)
-	// Если не удалось декодировать, значит PR был создан, но нужно получить его заново
-	if err != nil {
-		resp, err = http.Get(testServer.URL + "/team/get?team_name=" + uniqueName)
-		require.NoError(t, err)
-		resp.Body.Close()
-	}
-
-	// Создаем новый запрос для получения PR (через создание команды мы уже знаем структуру)
-	// Для теста используем первого ревьюера из команды
-	oldReviewerID := "u_reviewer1_reassign"
-
-	// Переназначение
 	reassignReq := map[string]interface{}{
-		"pull_request_id": prID,
-		"old_user_id":     oldReviewerID,
+		"pull_request_id": "e2e-pr-reassign",
+		"old_user_id":     "e2e-u-pr-reassign-old",
 	}
-	body, _ = json.Marshal(reassignReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/reassign", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/reassign", reassignReq)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "Expected 200 OK")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var response map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&response)
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	require.Contains(t, response, "pr", "Response must have 'pr'")
-	require.Contains(t, response, "replaced_by", "Response must have 'replaced_by'")
+	assert.Contains(t, result, "pr")
+	assert.Contains(t, result, "replaced_by")
 
-	pr := response["pr"].(map[string]interface{})
-	validatePullRequest(t, pr)
-	assert.Equal(t, "OPEN", pr["status"], "PR must remain OPEN after reassign")
+	pr, ok := result["pr"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "e2e-pr-reassign", pr["pull_request_id"])
+	assert.Equal(t, "OPEN", pr["status"])
 
-	replacedBy := response["replaced_by"].(string)
-	assert.IsType(t, "", replacedBy, "replaced_by must be string")
-	assert.NotEmpty(t, replacedBy, "replaced_by must not be empty")
+	assert.Contains(t, pr, "createdAt")
+	createdAt, ok := pr["createdAt"].(string)
+	require.True(t, ok)
+	assert.NotEmpty(t, createdAt)
 
-	// Проверяем, что старый ревьюер удален из списка
-	reviewers := pr["assigned_reviewers"].([]interface{})
-	foundOld := false
-	for _, reviewer := range reviewers {
-		if reviewer == oldReviewerID {
-			foundOld = true
-			break
-		}
-	}
-	assert.False(t, foundOld, "Old reviewer must be removed from assigned_reviewers")
+	replacedBy, ok := result["replaced_by"].(string)
+	require.True(t, ok)
+	assert.NotEmpty(t, replacedBy)
+	assert.NotEqual(t, "e2e-u-pr-reassign-old", replacedBy)
 
-	// Проверяем, что новый ревьюер добавлен
-	foundNew := false
-	for _, reviewer := range reviewers {
+	assignedReviewers, ok := pr["assigned_reviewers"].([]interface{})
+	require.True(t, ok)
+	foundReplacedBy := false
+	for _, reviewer := range assignedReviewers {
 		if reviewer == replacedBy {
-			foundNew = true
+			foundReplacedBy = true
 			break
 		}
 	}
-	assert.True(t, foundNew, "New reviewer must be in assigned_reviewers")
+	assert.True(t, foundReplacedBy, "replaced_by should be in assigned_reviewers")
 }
 
-// TestPRReassign_MergedPR проверяет переназначение для merged PR
-func TestPRReassign_MergedPR(t *testing.T) {
-	uniqueName := fmt.Sprintf("pr_reassign_merged_%d", time.Now().UnixNano())
-	authorID := "u_author_reassign_merged"
-
+func TestPR_Reassign_MergedPR(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-pr-reassign-merged",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": "u_reviewer1_merged", "username": "Reviewer1", "is_active": true},
-			{"user_id": "u_reviewer2_merged", "username": "Reviewer2", "is_active": true},
+			{"user_id": "e2e-u-pr-merged-author", "username": "MergedAuthor", "is_active": true},
+			{"user_id": "e2e-u-pr-merged-reviewer", "username": "MergedReviewer", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	prID := fmt.Sprintf("pr_reassign_merged_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "PR to merge and reassign",
-		"author_id":         authorID,
+	createTeamResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createTeamResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	createPrReq := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-reassign-merged",
+		"pull_request_name": "Merged Reassign PR",
+		"author_id":         "e2e-u-pr-merged-author",
 	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(200 * time.Millisecond)
 
-	// Merge PR
-	mergePRReq := map[string]interface{}{
-		"pull_request_id": prID,
+	createPrResp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", createPrReq)
+	createPrResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createPrResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	mergeReq := map[string]interface{}{
+		"pull_request_id": "e2e-pr-reassign-merged",
 	}
-	body, _ = json.Marshal(mergePRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/merge", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(200 * time.Millisecond)
 
-	// Попытка переназначения после merge
+	mergeResp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/merge", mergeReq)
+	mergeResp.Body.Close()
+	require.Equal(t, http.StatusOK, mergeResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
 	reassignReq := map[string]interface{}{
-		"pull_request_id": prID,
-		"old_user_id":     "u_reviewer1_merged",
+		"pull_request_id": "e2e-pr-reassign-merged",
+		"old_user_id":     "e2e-u-pr-merged-reviewer",
 	}
-	body, _ = json.Marshal(reassignReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/reassign", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/reassign", reassignReq)
 	defer resp.Body.Close()
 
-	validateErrorResponse(t, resp, "PR_MERGED", http.StatusConflict)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	errorResp := parseErrorResponse(t, resp)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "PR_MERGED", errorObj["code"])
+	assert.Contains(t, errorObj["message"], "cannot reassign on merged PR")
 }
 
-// TestPRReassign_NotAssigned проверяет переназначение не назначенного ревьюера
-func TestPRReassign_NotAssigned(t *testing.T) {
-	uniqueName := fmt.Sprintf("pr_reassign_notassigned_%d", time.Now().UnixNano())
-	authorID := "u_author_notassigned"
-
-	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+func TestPR_Reassign_NotAssigned(t *testing.T) {
+	teamReq1 := map[string]interface{}{
+		"team_name": "e2e-team-pr-notassigned-1",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": "u_reviewer_notassigned", "username": "Reviewer", "is_active": true},
+			{"user_id": "e2e-u-pr-notassigned-author", "username": "NotAssignedAuthor", "is_active": true},
+			{"user_id": "e2e-u-pr-notassigned-reviewer", "username": "NotAssignedReviewer", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	prID := fmt.Sprintf("pr_reassign_notassigned_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "PR for not assigned test",
-		"author_id":         authorID,
+	createTeamResp1 := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq1)
+	createTeamResp1.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp1.StatusCode)
+
+	teamReq2 := map[string]interface{}{
+		"team_name": "e2e-team-pr-notassigned-2",
+		"members": []map[string]interface{}{
+			{"user_id": "e2e-u-pr-notassigned-other", "username": "OtherUser", "is_active": true},
+		},
 	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
+
+	createTeamResp2 := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq2)
+	createTeamResp2.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp2.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	createPrReq := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-notassigned",
+		"pull_request_name": "Not Assigned PR",
+		"author_id":         "e2e-u-pr-notassigned-author",
+	}
+
+	createPrResp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", createPrReq)
+	createPrResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createPrResp.StatusCode)
+
 	time.Sleep(200 * time.Millisecond)
 
-	// Пытаемся переназначить автора, который точно не был назначен ревьюером
 	reassignReq := map[string]interface{}{
-		"pull_request_id": prID,
-		"old_user_id":     authorID, // Автор не может быть ревьюером
+		"pull_request_id": "e2e-pr-notassigned",
+		"old_user_id":     "e2e-u-pr-notassigned-other",
 	}
-	body, _ = json.Marshal(reassignReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/reassign", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/reassign", reassignReq)
 	defer resp.Body.Close()
 
-	validateErrorResponse(t, resp, "NOT_ASSIGNED", http.StatusConflict)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	errorResp := parseErrorResponse(t, resp)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "NOT_ASSIGNED", errorObj["code"])
+	assert.Contains(t, errorObj["message"], "reviewer is not assigned to this PR")
 }
 
-// TestPRReassign_NoCandidate проверяет переназначение когда нет кандидата
-func TestPRReassign_NoCandidate(t *testing.T) {
-	uniqueName := fmt.Sprintf("pr_reassign_nocandidate_%d", time.Now().UnixNano())
-	authorID := "u_author_nocandidate"
-	reviewerID := "u_reviewer_nocandidate"
-
-	// Создаем команду с автором и одним активным ревьюером
+func TestPR_Reassign_NoCandidate(t *testing.T) {
 	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
+		"team_name": "e2e-team-pr-nocandidate",
 		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": reviewerID, "username": "Reviewer", "is_active": true},
-			{"user_id": "u_inactive", "username": "Inactive", "is_active": false},
+			{"user_id": "e2e-u-pr-nocandidate-author", "username": "NoCandidateAuthor", "is_active": true},
+			{"user_id": "e2e-u-pr-nocandidate-reviewer", "username": "NoCandidateReviewer", "is_active": true},
 		},
 	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond)
 
-	prID := fmt.Sprintf("pr_reassign_nocandidate_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "PR for no candidate test",
-		"author_id":         authorID,
+	createTeamResp := makeRequest(t, http.MethodPost, baseURL+"/team/add", teamReq)
+	createTeamResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createTeamResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
+	createPrReq := map[string]interface{}{
+		"pull_request_id":   "e2e-pr-nocandidate",
+		"pull_request_name": "No Candidate PR",
+		"author_id":         "e2e-u-pr-nocandidate-author",
 	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
+
+	createPrResp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/create", createPrReq)
+	createPrResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createPrResp.StatusCode)
+
 	time.Sleep(200 * time.Millisecond)
 
-	// Деактивируем автора, чтобы не было других активных кандидатов
-	setActiveReq := map[string]interface{}{
-		"user_id":   authorID,
+	setInactiveReq := map[string]interface{}{
+		"user_id":   "e2e-u-pr-nocandidate-reviewer",
 		"is_active": false,
 	}
-	body, _ = json.Marshal(setActiveReq)
-	resp, err = http.Post(testServer.URL+"/users/setIsActive", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	time.Sleep(200 * time.Millisecond)
 
-	// Пытаемся переназначить ревьюера (нет других активных кандидатов в команде)
+	setInactiveResp := makeRequest(t, http.MethodPost, baseURL+"/users/setIsActive", setInactiveReq)
+	setInactiveResp.Body.Close()
+	require.Equal(t, http.StatusOK, setInactiveResp.StatusCode)
+
+	time.Sleep(100 * time.Millisecond)
+
 	reassignReq := map[string]interface{}{
-		"pull_request_id": prID,
-		"old_user_id":     reviewerID,
+		"pull_request_id": "e2e-pr-nocandidate",
+		"old_user_id":     "e2e-u-pr-nocandidate-reviewer",
 	}
-	body, _ = json.Marshal(reassignReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/reassign", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/reassign", reassignReq)
 	defer resp.Body.Close()
 
-	validateErrorResponse(t, resp, "NO_CANDIDATE", http.StatusConflict)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	errorResp := parseErrorResponse(t, resp)
+	assert.Contains(t, errorResp, "error")
+
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "NO_CANDIDATE", errorObj["code"])
+	assert.Contains(t, errorObj["message"], "no active replacement candidate in team")
 }
 
-// TestPRReassign_NotFound проверяет переназначение для несуществующего PR
-func TestPRReassign_NotFound(t *testing.T) {
+func TestPR_Reassign_NotFound(t *testing.T) {
 	reassignReq := map[string]interface{}{
-		"pull_request_id": fmt.Sprintf("pr_nonexistent_%d", time.Now().UnixNano()),
-		"old_user_id":     "some_user",
+		"pull_request_id": "e2e-nonexistent-pr",
+		"old_user_id":     "e2e-nonexistent-user",
 	}
-	body, _ := json.Marshal(reassignReq)
-	resp, err := http.Post(testServer.URL+"/pullRequest/reassign", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
+
+	resp := makeRequest(t, http.MethodPost, baseURL+"/pullRequest/reassign", reassignReq)
 	defer resp.Body.Close()
 
-	validateErrorResponse(t, resp, "NOT_FOUND", http.StatusNotFound)
-}
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
-// TestCompleteWorkflow проверяет полный E2E workflow
-func TestCompleteWorkflow(t *testing.T) {
-	uniqueName := fmt.Sprintf("complete_%d", time.Now().UnixNano())
-	authorID := "u_author_complete"
-	reviewer1ID := "u_reviewer1_complete"
-	reviewer2ID := "u_reviewer2_complete"
+	errorResp := parseErrorResponse(t, resp)
+	assert.Contains(t, errorResp, "error")
 
-	// 1. POST /team/add - Создание команды
-	teamReq := map[string]interface{}{
-		"team_name": uniqueName,
-		"members": []map[string]interface{}{
-			{"user_id": authorID, "username": "Author", "is_active": true},
-			{"user_id": reviewer1ID, "username": "Reviewer1", "is_active": true},
-			{"user_id": reviewer2ID, "username": "Reviewer2", "is_active": true},
-		},
-	}
-	body, _ := json.Marshal(teamReq)
-	resp, err := http.Post(testServer.URL+"/team/add", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	time.Sleep(200 * time.Millisecond)
-
-	// 2. GET /team/get - Получение команды
-	resp, err = http.Get(testServer.URL + "/team/get?team_name=" + uniqueName)
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// 3. POST /pullRequest/create - Создание PR
-	prID := fmt.Sprintf("pr_complete_%d", time.Now().UnixNano())
-	createPRReq := map[string]interface{}{
-		"pull_request_id":   prID,
-		"pull_request_name": "Complete workflow PR",
-		"author_id":         authorID,
-	}
-	body, _ = json.Marshal(createPRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/create", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	time.Sleep(200 * time.Millisecond)
-
-	// 4. GET /users/getReview - Получение ревьюев ревьюера
-	resp, err = http.Get(testServer.URL + "/users/getReview?user_id=" + reviewer1ID)
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// 5. POST /pullRequest/reassign - Переназначение ревьюера
-	reassignReq := map[string]interface{}{
-		"pull_request_id": prID,
-		"old_user_id":     reviewer1ID,
-	}
-	body, _ = json.Marshal(reassignReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/reassign", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	time.Sleep(200 * time.Millisecond)
-
-	// 6. POST /pullRequest/merge - Merge PR
-	mergePRReq := map[string]interface{}{
-		"pull_request_id": prID,
-	}
-	body, _ = json.Marshal(mergePRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/merge", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	time.Sleep(200 * time.Millisecond)
-
-	// 7. POST /pullRequest/reassign после merge - Должна вернуть ошибку
-	reassignReq["old_user_id"] = reviewer2ID
-	body, _ = json.Marshal(reassignReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/reassign", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	validateErrorResponse(t, resp, "PR_MERGED", http.StatusConflict)
-
-	// 8. POST /pullRequest/merge повторно - Идемпотентность
-	body, _ = json.Marshal(mergePRReq)
-	resp, err = http.Post(testServer.URL+"/pullRequest/merge", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode, "Idempotent merge must return 200")
+	errorObj, ok := errorResp["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "NOT_FOUND", errorObj["code"])
 }

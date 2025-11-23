@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
@@ -138,4 +140,23 @@ func (r *UserRepository) GetReview(ctx context.Context, d *dto.GetReviewDTO) (*r
 		UserId: d.UserId,
 		Prs:    prs,
 	}, nil
+}
+
+func (r *UserRepository) CheckUserExists(ctx context.Context, userId string) (bool, error) {
+	r.log.Debug("check user exists", zap.String("user_id", userId))
+
+	var id string
+	err := r.db.QueryRow(ctx, selectUserQuery, userId).Scan(&id, new(string), new(string), new(bool), new(sql.NullTime))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		r.log.Error("failed to check user existence",
+			zap.String("user_id", userId),
+			zap.Error(err),
+		)
+		return false, handleDBError(err)
+	}
+
+	return true, nil
 }

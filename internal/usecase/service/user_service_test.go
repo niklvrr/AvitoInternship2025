@@ -36,6 +36,11 @@ func (m *MockUserRepository) GetReview(ctx context.Context, d *dto.GetReviewDTO)
 	return args.Get(0).(*result.GetReviewResult), args.Error(1)
 }
 
+func (m *MockUserRepository) CheckUserExists(ctx context.Context, userId string) (bool, error) {
+	args := m.Called(ctx, userId)
+	return args.Bool(0), args.Error(1)
+}
+
 func TestUserService_SetIsActive_Success(t *testing.T) {
 	logger := zap.NewNop()
 	mockRepo := new(MockUserRepository)
@@ -143,6 +148,7 @@ func TestUserService_GetReview_Success(t *testing.T) {
 		Prs:    expectedPrs,
 	}
 
+	mockRepo.On("CheckUserExists", mock.Anything, "user1").Return(true, nil)
 	mockRepo.On("GetReview", mock.Anything, mock.MatchedBy(func(d *dto.GetReviewDTO) bool {
 		return d.UserId == "user1"
 	})).Return(expectedResult, nil)
@@ -167,7 +173,7 @@ func TestUserService_GetReview_UserNotFound(t *testing.T) {
 		UserId: "user1",
 	}
 
-	mockRepo.On("GetReview", mock.Anything, mock.Anything).Return(nil, repository.ErrNotFound)
+	mockRepo.On("CheckUserExists", mock.Anything, "user1").Return(false, nil)
 
 	resp, err := service.GetReview(context.Background(), req)
 

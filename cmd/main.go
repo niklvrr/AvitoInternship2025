@@ -58,6 +58,7 @@ func main() {
 	userHandler := handler.NewUserHandler(userService, logger)
 	teamHandler := handler.NewTeamHandler(teamService, logger)
 	prHandler := handler.NewPrHandler(prService, logger)
+	statsHandler := handler.NewStatsHandler(prService, logger)
 	healthHandler := handler.NewHealthHandler(logger)
 
 	// Инициализация роутера
@@ -65,6 +66,7 @@ func main() {
 		userHandler,
 		teamHandler,
 		prHandler,
+		statsHandler,
 		healthHandler,
 		logger,
 	)
