@@ -1,10 +1,9 @@
-package usecase
+package service
 
 import (
 	"context"
 	"errors"
 	"fmt"
-
 	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/repository"
 
 	"github.com/niklvrr/AvitoInternship2025/internal/domain"

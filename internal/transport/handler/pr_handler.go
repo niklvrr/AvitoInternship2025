@@ -3,12 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"github.com/niklvrr/AvitoInternship2025/internal/usecase/service"
 	"net/http"
 
-	"github.com/niklvrr/AvitoInternship2025/internal/transport"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/request"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/response"
-	"github.com/niklvrr/AvitoInternship2025/internal/usecase"
 	"go.uber.org/zap"
 )
 
@@ -40,8 +39,8 @@ func (h *PrHandler) CreatePr(w http.ResponseWriter, r *http.Request) {
 	var req request.CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.log.Error("failed to decode request body", zap.Error(err))
-		statusCode, errResp := transport.HandleError(err)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(err)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -52,8 +51,8 @@ func (h *PrHandler) CreatePr(w http.ResponseWriter, r *http.Request) {
 			zap.String("pr_name", req.PrName),
 			zap.String("author_id", req.AuthorId),
 		)
-		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(service.ErrInvalidInput)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -65,8 +64,8 @@ func (h *PrHandler) CreatePr(w http.ResponseWriter, r *http.Request) {
 			zap.String("author_id", req.AuthorId),
 			zap.Error(err),
 		)
-		statusCode, errResp := transport.HandleError(err)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(err)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -95,16 +94,16 @@ func (h *PrHandler) MergePr(w http.ResponseWriter, r *http.Request) {
 	var req request.MergeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.log.Error("failed to decode request body", zap.Error(err))
-		statusCode, errResp := transport.HandleError(err)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(err)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
 	// Валидация
 	if req.PrId == "" {
 		h.log.Warn("validation failed: pr_id is empty")
-		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(service.ErrInvalidInput)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -115,8 +114,8 @@ func (h *PrHandler) MergePr(w http.ResponseWriter, r *http.Request) {
 			zap.String("pr_id", req.PrId),
 			zap.Error(err),
 		)
-		statusCode, errResp := transport.HandleError(err)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(err)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -145,8 +144,8 @@ func (h *PrHandler) ReassignPr(w http.ResponseWriter, r *http.Request) {
 	var req request.ReassignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.log.Error("failed to decode request body", zap.Error(err))
-		statusCode, errResp := transport.HandleError(err)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(err)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -156,8 +155,8 @@ func (h *PrHandler) ReassignPr(w http.ResponseWriter, r *http.Request) {
 			zap.String("pr_id", req.PrId),
 			zap.String("old_user_id", req.OldUserId),
 		)
-		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(service.ErrInvalidInput)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -169,8 +168,8 @@ func (h *PrHandler) ReassignPr(w http.ResponseWriter, r *http.Request) {
 			zap.String("old_user_id", req.OldUserId),
 			zap.Error(err),
 		)
-		statusCode, errResp := transport.HandleError(err)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(err)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 

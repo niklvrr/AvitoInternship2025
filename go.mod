@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/go-chi/chi/v5 v5.2.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect

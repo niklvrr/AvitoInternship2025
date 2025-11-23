@@ -1,11 +1,10 @@
-package transport
+package handler
 
 import (
 	"encoding/json"
 	"errors"
+	"github.com/niklvrr/AvitoInternship2025/internal/usecase/service"
 	"net/http"
-
-	"github.com/niklvrr/AvitoInternship2025/internal/usecase"
 )
 
 type ErrorResponse struct {
@@ -23,7 +22,7 @@ func HandleError(err error) (int, ErrorResponse) {
 		return http.StatusOK, ErrorResponse{}
 	}
 
-	var domainErr *usecase.DomainError
+	var domainErr *service.DomainError
 	if errors.As(err, &domainErr) {
 		// Маппим код ошибки на HTTP статус
 		statusCode := mapErrorCodeToHTTPStatus(domainErr.Code)

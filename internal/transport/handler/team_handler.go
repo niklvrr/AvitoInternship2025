@@ -3,12 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"github.com/niklvrr/AvitoInternship2025/internal/usecase/service"
 	"net/http"
 
-	"github.com/niklvrr/AvitoInternship2025/internal/transport"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/request"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/response"
-	"github.com/niklvrr/AvitoInternship2025/internal/usecase"
 	"go.uber.org/zap"
 )
 
@@ -39,16 +38,16 @@ func (h *TeamHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
 	var req request.AddTeamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.log.Error("failed to decode request body", zap.Error(err))
-		statusCode, errResp := transport.HandleError(err)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(err)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
 	// Валидация
 	if req.TeamName == "" {
 		h.log.Warn("validation failed: team_name is empty")
-		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(service.ErrInvalidInput)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -60,8 +59,8 @@ func (h *TeamHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
 			zap.Int("members_count", len(req.Members)),
 			zap.Error(err),
 		)
-		statusCode, errResp := transport.HandleError(err)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(err)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -101,8 +100,8 @@ func (h *TeamHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
 	teamName := r.URL.Query().Get("team_name")
 	if teamName == "" {
 		h.log.Warn("validation failed: team_name query parameter is empty")
-		statusCode, errResp := transport.HandleError(usecase.ErrInvalidInput)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(service.ErrInvalidInput)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
@@ -118,8 +117,8 @@ func (h *TeamHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
 			zap.String("team_name", teamName),
 			zap.Error(err),
 		)
-		statusCode, errResp := transport.HandleError(err)
-		transport.WriteError(w, statusCode, errResp)
+		statusCode, errResp := HandleError(err)
+		WriteError(w, statusCode, errResp)
 		return
 	}
 
