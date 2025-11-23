@@ -1,0 +1,5 @@
+POST http://localhost:8080/team/add
+Content-Type: application/json
+
+{"team_name": "load_test_team_1", "members": [{"user_id": "u1_load_1", "username": "Alice", "is_active": true}, {"user_id": "u2_load_1", "username": "Bob", "is_active": true}]}
+

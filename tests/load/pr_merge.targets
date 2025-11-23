@@ -1,0 +1,5 @@
+POST http://localhost:8080/pullRequest/merge
+Content-Type: application/json
+
+{"pull_request_id": "pr_load_1"}
+

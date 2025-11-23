@@ -1,0 +1,5 @@
+POST http://localhost:8080/pullRequest/create
+Content-Type: application/json
+
+{"pull_request_id": "pr_load_1", "pull_request_name": "Load Test PR 1", "author_id": "u1_load_1"}
+
