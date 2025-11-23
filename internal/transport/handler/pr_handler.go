@@ -3,8 +3,9 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"github.com/niklvrr/AvitoInternship2025/internal/usecase/service"
 	"net/http"
+
+	"github.com/niklvrr/AvitoInternship2025/internal/usecase/service"
 
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/request"
 	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/response"

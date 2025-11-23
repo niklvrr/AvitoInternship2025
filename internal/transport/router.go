@@ -29,9 +29,9 @@ func NewRouter(
 	})
 
 	router.Route("/pullRequest", func(r chi.Router) {
-		r.Post("create", prHandler.CreatePr)
+		r.Post("/create", prHandler.CreatePr)
 		r.Post("/merge", prHandler.MergePr)
-		r.Post("reassign", prHandler.ReassignPr)
+		r.Post("/reassign", prHandler.ReassignPr)
 	})
 
 	router.Get("/health", healthHandler.HealthCheck)

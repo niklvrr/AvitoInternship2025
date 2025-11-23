@@ -20,7 +20,8 @@ RETURNING id, name, author_id, status, created_at, merged_at;`
 
 	selectTeamQuery = `
 SELECT team_id FROM team_members
-WHERE user_id = $1;`
+WHERE user_id = $1
+LIMIT 1;`
 
 	selectTeamMembersQuery = `
 SELECT
