@@ -1,0 +1,447 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math/rand"
+	"strings"
+	"time"
+
+	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/repository"
+
+	"github.com/niklvrr/AvitoInternship2025/internal/domain"
+	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/dto"
+	"github.com/niklvrr/AvitoInternship2025/internal/infrastructure/models/result"
+	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/request"
+	"github.com/niklvrr/AvitoInternship2025/internal/transport/dto/response"
+	"go.uber.org/zap"
+)
+
+var (
+	createError              = errors.New("create pull request error")
+	mergeError               = errors.New("merge pull request error")
+	reassignError            = errors.New("reassigning pull request reviewer error")
+	noPotentialReviewerError = errors.New("no active reviewer available")
+)
+
+const (
+	reviewerCountForCreate   = 2
+	reviewerCountForReassign = 1
+)
+
+// Интерфейс репозитория
+type PrRepository interface {
+	Create(ctx context.Context, dto *dto.CreatPrDTO, prReviewers []string) (*result.PrResult, error)
+	Merge(ctx context.Context, dto *dto.MergePrDTO) (*result.PrResult, error)
+	Reassign(ctx context.Context, dto *dto.ReassignPrDTO) (*result.ReassignResult, error)
+	SelectPotentialReviewers(ctx context.Context, userId string) ([]*domain.User, error)
+	CheckReviewerAssigned(ctx context.Context, prId, reviewerId string) (bool, error)
+	CheckReviewerAssignedWithPR(ctx context.Context, prId, reviewerId string) (bool, string, error)
+	GetStats(ctx context.Context) (*result.StatsResult, error)
+}
+
+type PrService struct {
+	repo PrRepository
+	log  *zap.Logger
+}
+
+func NewPrService(repo PrRepository, log *zap.Logger) *PrService {
+	return &PrService{
+		repo: repo,
+		log:  log,
+	}
+}
+
+func (s *PrService) Create(ctx context.Context, req *request.CreateRequest) (*response.CreateResponse, error) {
+	authorId, err := normalizeID(req.AuthorId, "author_id")
+	if err != nil {
+		return nil, WrapError(ErrPrNotFound, err)
+	}
+	s.log.Info("create PR request accepted",
+		zap.String("pr_id", req.PrId),
+		zap.String("author_id", authorId),
+	)
+
+	// Читаем всех членов команды автора
+	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, authorId)
+	if err != nil {
+		s.log.Error("failed to load potential reviewers",
+			zap.String("author_id", authorId),
+			zap.Error(err),
+		)
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+
+		// Неизвестная ошибка
+		return nil, fmt.Errorf("%w: %w", createError, err)
+	}
+
+	// Ищем до двух активных ревьюеров, исключая автора
+	reviewers, err := findReviewers(potentialReviewers, authorId, reviewerCountForCreate)
+	if err != nil {
+		if errors.Is(err, noPotentialReviewerError) {
+			s.log.Info("no reviewers available, creating PR with empty reviewers list",
+				zap.String("author_id", authorId),
+			)
+			reviewers = []string{} // Пустой массив ревьюеров
+		} else {
+			s.log.Warn("error finding reviewers",
+				zap.String("author_id", authorId),
+				zap.Error(err),
+			)
+
+			// Маппим другие ошибки
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, WrapError(ErrPrNotFound, err)
+			}
+
+			// Неизвестная ошибка
+			return nil, fmt.Errorf("%w: %w", createError, err)
+		}
+	}
+
+	prId, err := normalizeID(req.PrId, "pull_request_id")
+	if err != nil {
+		return nil, WrapError(ErrPrNotFound, err)
+	}
+
+	dto := &dto.CreatPrDTO{
+		PrId:     prId,
+		PrName:   req.PrName,
+		AuthorId: authorId,
+	}
+
+	res, err := s.repo.Create(ctx, dto, reviewers)
+	if err != nil {
+		s.log.Error("failed to create PR",
+			zap.String("pr_id", prId),
+			zap.Error(err),
+		)
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, WrapError(ErrPrExists, err)
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+		return nil, fmt.Errorf("%w: %w", createError, err)
+	}
+
+	s.log.Info("PR created",
+		zap.String("pr_id", res.Id),
+		zap.Strings("assigned_reviewers", res.AssignedReviewers),
+	)
+
+	return &response.CreateResponse{
+		PrId:              res.Id,
+		PrName:            res.Name,
+		AuthorId:          res.AuthorId,
+		Status:            res.Status,
+		AssignedReviewers: res.AssignedReviewers,
+		CreatedAt:         formatTime(res.CreatedAt),
+		MergedAt:          formatTimePtr(res.MergedAt),
+	}, nil
+}
+
+func (s *PrService) Merge(ctx context.Context, req *request.MergeRequest) (*response.MergeResponse, error) {
+	prId, err := normalizeID(req.PrId, "pull_request_id")
+	if err != nil {
+		return nil, WrapError(ErrPrNotFound, err)
+	}
+	s.log.Info("merge PR request accepted", zap.String("pr_id", prId))
+
+	dto := &dto.MergePrDTO{
+		PrId: prId,
+	}
+
+	// Запрос в бд на изменение статуса
+	res, err := s.repo.Merge(ctx, dto)
+	if err != nil {
+		s.log.Error("failed to merge PR",
+			zap.String("pr_id", prId),
+			zap.Error(err),
+		)
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+
+		// Неизвестная ошибка
+		return nil, fmt.Errorf("%w: %w", mergeError, err)
+	}
+
+	s.log.Info("PR merged",
+		zap.String("pr_id", res.Id),
+		zap.String("status", res.Status),
+	)
+
+	return &response.MergeResponse{
+		PrId:              res.Id,
+		PrName:            res.Name,
+		AuthorId:          res.AuthorId,
+		Status:            res.Status,
+		AssignedReviewers: res.AssignedReviewers,
+		CreatedAt:         formatTime(res.CreatedAt),
+		MergedAt:          formatTimePtr(res.MergedAt),
+	}, nil
+}
+
+func (s *PrService) Reassign(ctx context.Context, req *request.ReassignRequest) (*response.ReassignResponse, error) {
+	prId, err := normalizeID(req.PrId, "pull_request_id")
+	if err != nil {
+		return nil, WrapError(ErrPrNotFound, err)
+	}
+
+	// Парсим идентификатор старого ревьюера
+	oldReviewerId, err := normalizeID(req.OldUserId, "old_user_id")
+	if err != nil {
+		return nil, WrapError(ErrPrNotFound, err)
+	}
+	s.log.Info("reassign reviewer request accepted",
+		zap.String("pr_id", prId),
+		zap.String("old_user_id", oldReviewerId),
+	)
+
+	// Проверяем что ревьюер назначен на PR и получаем информацию о PR
+	isAssigned, prAuthorId, err := s.repo.CheckReviewerAssignedWithPR(ctx, prId, oldReviewerId)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+		if errors.Is(err, repository.ErrPrMergedStatus) {
+			return nil, WrapError(ErrPrMerged, err)
+		}
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
+	}
+	if !isAssigned {
+		return nil, WrapError(ErrReviewerNotAssigned, errors.New("reviewer is not assigned to this PR"))
+	}
+
+	// Читаем всех членов команды старого ревьюера
+	potentialReviewers, err := s.repo.SelectPotentialReviewers(ctx, oldReviewerId)
+	if err != nil {
+		s.log.Error("failed to load team members for reassign",
+			zap.String("old_user_id", oldReviewerId),
+			zap.Error(err),
+		)
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+
+		// Неизвестная ошибка
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
+	}
+
+	// Ищем нового активного ревьюера, исключая старого и автора PR
+	newReviewer, err := findReviewersExcludingAuthor(potentialReviewers, oldReviewerId, prAuthorId, reviewerCountForReassign)
+	if err != nil {
+		s.log.Warn("no replacement reviewer available",
+			zap.String("pr_id", prId),
+			zap.String("old_user_id", oldReviewerId),
+			zap.Error(err),
+		)
+
+		if errors.Is(err, noPotentialReviewerError) {
+			return nil, ErrNoCandidate
+		}
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
+	}
+	newReviewerId := newReviewer[0]
+
+	// Собираем dto для репозитория
+	dto := &dto.ReassignPrDTO{
+		PrId:          prId,
+		OldReviewerId: oldReviewerId,
+		ReplacedBy:    newReviewerId,
+	}
+
+	// Запрос в бд на переназначение ревьюеров
+	res, err := s.repo.Reassign(ctx, dto)
+	if err != nil {
+		s.log.Error("failed to reassign reviewer",
+			zap.String("pr_id", prId),
+			zap.String("old_user_id", oldReviewerId),
+			zap.String("new_reviewer_id", newReviewerId),
+			zap.Error(err),
+		)
+
+		// Маппим ошибки
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, WrapError(ErrPrExists, err)
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, WrapError(ErrPrNotFound, err)
+		}
+		if errors.Is(err, repository.ErrPrMergedStatus) {
+			return nil, WrapError(ErrPrMerged, err)
+		}
+		if errors.Is(err, repository.ErrReviewerNotAssigned) {
+			return nil, WrapError(ErrReviewerNotAssigned, err)
+		}
+		return nil, fmt.Errorf("%w: %w", reassignError, err)
+	}
+
+	s.log.Info("reviewer reassigned",
+		zap.String("pr_id", res.Pr.Id),
+		zap.Strings("assigned_reviewers", res.Pr.AssignedReviewers),
+		zap.String("replaced_by", res.ReplacedBy),
+	)
+
+	return &response.ReassignResponse{
+		PrId:              res.Pr.Id,
+		PrName:            res.Pr.Name,
+		AuthorId:          res.Pr.AuthorId,
+		Status:            res.Pr.Status,
+		AssignedReviewers: res.Pr.AssignedReviewers,
+		ReplacedBy:        res.ReplacedBy,
+		CreatedAt:         formatTime(res.Pr.CreatedAt),
+		MergedAt:          formatTimePtr(res.Pr.MergedAt),
+	}, nil
+}
+
+func findReviewers(potentialReviewers []*domain.User, excludedId string, reviewerCount int) ([]string, error) {
+	var reviewers []*domain.User
+	for _, potentialReviewer := range potentialReviewers {
+		if potentialReviewer == nil {
+			continue
+		}
+
+		if potentialReviewer.Id == excludedId {
+			continue
+		}
+
+		if potentialReviewer.IsActive == false {
+			continue
+		}
+
+		reviewers = append(reviewers, potentialReviewer)
+	}
+
+	if len(reviewers) == 0 {
+		return nil, noPotentialReviewerError
+	}
+
+	rand.New(rand.NewSource(time.Now().UnixNano())).Shuffle(len(reviewers), func(i, j int) {
+		reviewers[i], reviewers[j] = reviewers[j], reviewers[i]
+	})
+
+	if len(reviewers) < reviewerCount {
+		reviewerCount = len(reviewers)
+	}
+
+	result := make([]string, 0, reviewerCount)
+	for i := 0; i < reviewerCount; i++ {
+		result = append(result, reviewers[i].Id)
+	}
+
+	return result, nil
+}
+
+func findReviewersExcludingAuthor(potentialReviewers []*domain.User, excludedId, authorId string, reviewerCount int) ([]string, error) {
+	var reviewers []*domain.User
+	for _, potentialReviewer := range potentialReviewers {
+		if potentialReviewer == nil {
+			continue
+		}
+
+		if potentialReviewer.Id == excludedId {
+			continue
+		}
+
+		if potentialReviewer.Id == authorId {
+			continue
+		}
+
+		if potentialReviewer.IsActive == false {
+			continue
+		}
+
+		reviewers = append(reviewers, potentialReviewer)
+	}
+
+	if len(reviewers) == 0 {
+		return nil, noPotentialReviewerError
+	}
+
+	rand.New(rand.NewSource(time.Now().UnixNano())).Shuffle(len(reviewers), func(i, j int) {
+		reviewers[i], reviewers[j] = reviewers[j], reviewers[i]
+	})
+
+	if len(reviewers) < reviewerCount {
+		reviewerCount = len(reviewers)
+	}
+
+	result := make([]string, 0, reviewerCount)
+	for i := 0; i < reviewerCount; i++ {
+		result = append(result, reviewers[i].Id)
+	}
+
+	return result, nil
+}
+
+func formatTime(t time.Time) string {
+	return t.UTC().Format(time.RFC3339)
+}
+
+func formatTimePtr(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	formatted := formatTime(*t)
+	return &formatted
+}
+
+func (s *PrService) GetStats(ctx context.Context) (*response.StatsResponse, error) {
+	s.log.Info("get statistics request accepted")
+
+	stats, err := s.repo.GetStats(ctx)
+	if err != nil {
+		s.log.Error("failed to get statistics", zap.Error(err))
+		return nil, err
+	}
+
+	// Преобразуем результат репозитория в ответ
+	users := make([]response.UserStat, 0, len(stats.Users))
+	for _, u := range stats.Users {
+		users = append(users, response.UserStat{
+			UserId:      u.UserId,
+			Username:    u.Username,
+			Assignments: u.Assignments,
+		})
+	}
+
+	prs := make([]response.PrStat, 0, len(stats.PRs))
+	for _, p := range stats.PRs {
+		prs = append(prs, response.PrStat{
+			PrId:           p.PrId,
+			PrName:         p.PrName,
+			ReviewersCount: p.ReviewersCount,
+		})
+	}
+
+	s.log.Info("statistics retrieved",
+		zap.Int("users_count", len(users)),
+		zap.Int("prs_count", len(prs)),
+	)
+
+	return &response.StatsResponse{
+		Users: users,
+		PRs:   prs,
+	}, nil
+}
+
+func normalizeID(raw, field string) (string, error) {
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		return "", fmt.Errorf("%w: %s is empty", incorrectIdError, field)
+	}
+	return id, nil
+}

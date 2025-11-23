@@ -1,0 +1,162 @@
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - vendor
+    - migrations
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.gen\\.go$"
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  govet:
+    check-shadowing: true
+  gocyclo:
+    min-complexity: 15
+  dupl:
+    threshold: 100
+  goconst:
+    min-len: 2
+    min-occurrences: 2
+  misspell:
+    locale: US
+  lll:
+    line-length: 120
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+      - wrapperFunc
+  gosec:
+    severity: medium
+    confidence: medium
+  funlen:
+    lines: 100
+    statements: 50
+  gocognit:
+    min-complexity: 15
+  maligned:
+    suggest-new: true
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+  unconvert:
+    fast: false
+  unparam:
+    check-exported: false
+  nakedret:
+    max-func-lines: 30
+  varnamelen:
+    min-name-length: 2
+    max-name-length: 40
+    check-return: true
+    check-receiver: true
+    check-var: true
+  whitespace:
+    multi-if: true
+    multi-func: true
+
+linters:
+  disable-all: true
+  enable:
+    # Основные линтеры (обязательные)
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - typecheck
+    
+    # Стиль кода
+    - gofmt
+    - goimports
+    - misspell
+    - revive
+    - gocritic
+    - gosec
+    
+    # Сложность кода
+    - gocyclo
+    - gocognit
+    - funlen
+    
+    # Дополнительные проверки
+    - exportloopref
+    - prealloc
+    - unconvert
+    - unparam
+    - varnamelen
+    - whitespace
+    - nakedret
+    - noctx
+    - rowserrcheck
+    - sqlclosecheck
+    - errname
+    - errorlint
+    - gochecknoinits
+    - gochecknoglobals
+    - godot
+    - godox
+    - goerr113
+    - gomnd
+    - goprintffuncname
+    - lll
+    - maligned
+    - nolintlint
+    - stylecheck
+
+issues:
+  exclude-rules:
+    # Исключаем некоторые проверки для тестов
+    - path: _test\.go
+      linters:
+        - errcheck
+        - funlen
+        - gocyclo
+        - gocognit
+    
+    # Исключаем проверки для миграций
+    - path: migrations
+      linters:
+        - all
+    
+    # Игнорируем ошибки для сгенерированных файлов
+    - path: ".*\\.pb\\.go$"
+      linters:
+        - all
+    
+    # Игнорируем длинные строки в SQL запросах
+    - text: "line is"
+      linters:
+        - lll
+    
+    # Игнорируем ошибки для ошибок с контекстом
+    - text: "error var.*should have name of the form"
+      linters:
+        - errname
+  
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-use-default: false
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
