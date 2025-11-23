@@ -25,7 +25,7 @@ func WrapError(domainError *DomainError, err error) error {
 
 func (e *DomainError) Error() string {
 	if e.Err != nil {
-		return fmt.Sprintf("%s: %w", e.Message, e.Err)
+		return fmt.Sprintf("%s: %v", e.Message, e.Err)
 	}
 	return e.Message
 }
