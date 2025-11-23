@@ -12,12 +12,10 @@ import (
 )
 
 const (
-	baseURL      = "http://localhost:8080"
-	targetRPS    = 5
+	baseURL     = "http://localhost:8080"
+	targetRPS   = 5
 	testDuration = 2 * time.Minute
 )
-
-var rng *rand.Rand
 
 type TeamRequest struct {
 	TeamName string   `json:"team_name"`
@@ -58,7 +56,7 @@ func main() {
 	}
 
 	scenario := os.Args[1]
-	rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	rand.Seed(time.Now().UnixNano())
 
 	var metrics vegeta.Metrics
 	var err error
@@ -97,7 +95,7 @@ func testHealth() (vegeta.Metrics, error) {
 }
 
 func testTeam() (vegeta.Metrics, error) {
-	teamID := rng.Intn(10000)
+	teamID := rand.Intn(10000)
 	teamName := fmt.Sprintf("load_team_%d", teamID)
 
 	targeter := vegeta.NewStaticTargeter(
@@ -119,7 +117,7 @@ func testTeam() (vegeta.Metrics, error) {
 }
 
 func testUser() (vegeta.Metrics, error) {
-	userID := fmt.Sprintf("u_load_%d", rng.Intn(10000))
+	userID := fmt.Sprintf("u_load_%d", rand.Intn(10000))
 
 	targeter := vegeta.NewStaticTargeter(
 		vegeta.Target{
@@ -140,8 +138,8 @@ func testUser() (vegeta.Metrics, error) {
 }
 
 func testPR() (vegeta.Metrics, error) {
-	prID := fmt.Sprintf("pr_load_%d", rng.Intn(10000))
-	authorID := fmt.Sprintf("u_load_%d", rng.Intn(10000))
+	prID := fmt.Sprintf("pr_load_%d", rand.Intn(10000))
+	authorID := fmt.Sprintf("u_load_%d", rand.Intn(10000))
 
 	targeter := vegeta.NewStaticTargeter(
 		vegeta.Target{
@@ -166,7 +164,7 @@ func testPR() (vegeta.Metrics, error) {
 }
 
 func testAll() (vegeta.Metrics, error) {
-	teamID := rng.Intn(10000)
+	teamID := rand.Intn(10000)
 	teamName := fmt.Sprintf("load_team_%d", teamID)
 	userID1 := fmt.Sprintf("u_load_%d_1", teamID)
 	userID2 := fmt.Sprintf("u_load_%d_2", teamID)
@@ -296,8 +294,8 @@ func printMetrics(metrics vegeta.Metrics) {
 
 		fmt.Printf("\nErrors:\n")
 		if len(metrics.Errors) > 0 {
-			for _, err := range metrics.Errors {
-				fmt.Printf("  %s\n", err)
+			for err, count := range metrics.Errors {
+				fmt.Printf("  %s: %d\n", err, count)
 			}
 		} else {
 			fmt.Printf("  None\n")
@@ -322,3 +320,4 @@ func checkStatus(condition bool, pass, fail string) string {
 	}
 	return fail
 }
+

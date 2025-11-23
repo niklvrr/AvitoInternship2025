@@ -23,8 +23,6 @@ go install github.com/tsenart/vegeta/v12@latest
 
 ### Способ 1: Через Makefile (рекомендуется)
 
-Все команды используют Go скрипт для надежной работы с POST запросами:
-
 ```bash
 # Запустить все нагрузочные тесты
 make load-test
@@ -34,25 +32,19 @@ make load-test-health
 make load-test-team
 make load-test-user
 make load-test-pr
-
-# Альтернативные команды (то же самое)
-make load-test-go-health
-make load-test-go-team
-make load-test-go-user
-make load-test-go-pr
 ```
 
 ### Способ 2: Через Go скрипт
 
 ```bash
 # Запустить все сценарии
-go run tests/load/load.go all
+go run tests/load/load_test.go all
 
 # Запустить конкретный сценарий
-go run tests/load/load.go health
-go run tests/load/load.go team
-go run tests/load/load.go user
-go run tests/load/load.go pr
+go run tests/load/load_test.go health
+go run tests/load/load_test.go team
+go run tests/load/load_test.go user
+go run tests/load/load_test.go pr
 ```
 
 ### Способ 3: Через Vegeta CLI напрямую
@@ -79,7 +71,7 @@ vegeta plot results.bin > plot.html
 ## Файлы
 
 - `*.targets` - файлы с описанием HTTP запросов для Vegeta CLI
-- `load.go` - Go скрипт для комплексного тестирования с динамической генерацией данных
+- `load_test.go` - Go скрипт для комплексного тестирования с динамической генерацией данных
 - `README.md` - эта документация
 
 ## Интерпретация результатов
@@ -112,17 +104,9 @@ SLI Compliance:
 
 ## Перед запуском тестов
 
-1. **Обязательно**: Убедитесь, что приложение запущено и доступно на `http://localhost:8080`
-   ```bash
-   # Запустить приложение
-   make docker-up
-   # или
-   make run
-   ```
-
-2. Для тестов PR необходимо предварительно создать команду и пользователей (Go скрипт делает это автоматически)
-
-3. Тесты используют динамическую генерацию данных, поэтому конфликты маловероятны
+1. Убедитесь, что приложение запущено и доступно на `http://localhost:8080`
+2. Убедитесь, что база данных заполнена тестовыми данными (для некоторых тестов)
+3. Для комплексных тестов рекомендуется запустить миграции и создать базовые данные
 
 ## Примечания
 
