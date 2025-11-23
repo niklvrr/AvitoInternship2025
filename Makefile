@@ -1,4 +1,4 @@
-.PHONY: help build run test test-e2e test-all lint clean docker-build docker-up docker-down migrate-up migrate-down logs stop restart load-test load-test-check load-test-health load-test-team load-test-user load-test-pr load-test-go load-test-go-health load-test-go-team load-test-go-user load-test-go-pr load-test-save load-test-plot
+.PHONY: help build run test test-e2e test-all lint clean docker-build docker-up docker-down migrate-up migrate-down logs stop restart
 
 # Переменные
 APP_NAME := avito-internship
@@ -16,7 +16,7 @@ NC := \033[0m # No Color
 
 help: ## Показать справку по командам
 	@echo "$(GREEN)Доступные команды:$(NC)"
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
 
 # Сборка и запуск
 build: ## Собрать бинарный файл
@@ -78,80 +78,6 @@ test-coverage: ## Запустить тесты с покрытием
 
 test-short: ## Запустить только быстрые тесты
 	$(GO) test -short ./...
-
-test-e2e: ## Запустить E2E тесты
-	@echo "$(GREEN)Запуск E2E тестов...$(NC)"
-	$(GO) test -v -timeout 10m ./tests/e2e/...
-
-test-all: test test-e2e ## Запустить все тесты (unit + E2E)
-	@echo "$(GREEN)Все тесты завершены!$(NC)"
-
-# Нагрузочное тестирование
-VEGETA := vegeta
-LOAD_TEST_RATE := 5
-LOAD_TEST_DURATION := 2m
-LOAD_TEST_URL := http://localhost:8080
-
-load-test-check: ## Проверить наличие vegeta
-	@if ! command -v $(VEGETA) > /dev/null; then \
-		echo "$(RED)vegeta не установлен. Установите: go install github.com/tsenart/vegeta/v12@latest$(NC)"; \
-		echo "$(YELLOW)Или используйте: make load-test-go$(NC)"; \
-		exit 1; \
-	fi
-
-load-test: ## Запустить все нагрузочные тесты через Go скрипт
-	@echo "$(GREEN)Запуск нагрузочных тестов...$(NC)"
-	@echo "$(YELLOW)Убедитесь, что приложение запущено на $(LOAD_TEST_URL)$(NC)"
-	@cd tests/load && go run load.go all
-
-load-test-health: ## Тест health endpoint (использует Go скрипт)
-	@echo "$(GREEN)Тестирование health endpoint...$(NC)"
-	@cd tests/load && go run load.go health
-
-load-test-team: ## Тест team endpoints (использует Go скрипт)
-	@echo "$(GREEN)Тестирование team endpoints...$(NC)"
-	@cd tests/load && go run load.go team
-
-load-test-user: ## Тест user endpoints (использует Go скрипт)
-	@echo "$(GREEN)Тестирование user endpoints...$(NC)"
-	@cd tests/load && go run load.go user
-
-load-test-pr: ## Тест PR endpoints (использует Go скрипт)
-	@echo "$(GREEN)Тестирование PR endpoints...$(NC)"
-	@echo "$(YELLOW)Примечание: для тестов PR необходимо предварительно создать команду и пользователей$(NC)"
-	@cd tests/load && go run load.go pr
-
-load-test-go: ## Запустить нагрузочные тесты через Go скрипт
-	@echo "$(GREEN)Запуск нагрузочных тестов через Go...$(NC)"
-	@echo "$(YELLOW)Убедитесь, что приложение запущено на $(LOAD_TEST_URL)$(NC)"
-	@cd tests/load && go run load.go all
-
-load-test-go-health: ## Тест health через Go скрипт
-	@cd tests/load && go run load.go health
-
-load-test-go-team: ## Тест team через Go скрипт
-	@cd tests/load && go run load.go team
-
-load-test-go-user: ## Тест user через Go скрипт
-	@cd tests/load && go run load.go user
-
-load-test-go-pr: ## Тест PR через Go скрипт
-	@cd tests/load && go run load.go pr
-
-load-test-save: load-test-check ## Запустить тесты и сохранить результаты в файл
-	@echo "$(GREEN)Запуск тестов с сохранением результатов...$(NC)"
-	@echo "GET $(LOAD_TEST_URL)/health" | $(VEGETA) attack -rate=$(LOAD_TEST_RATE) -duration=$(LOAD_TEST_DURATION) > tests/load/results.bin
-	@$(VEGETA) report tests/load/results.bin
-	@echo "$(GREEN)Результаты сохранены в tests/load/results.bin$(NC)"
-	@echo "$(YELLOW)Для визуализации: vegeta plot tests/load/results.bin > tests/load/plot.html$(NC)"
-
-load-test-plot: load-test-check ## Создать график из сохраненных результатов
-	@if [ ! -f tests/load/results.bin ]; then \
-		echo "$(RED)Файл results.bin не найден. Сначала запустите: make load-test-save$(NC)"; \
-		exit 1; \
-	fi
-	@$(VEGETA) plot tests/load/results.bin > tests/load/plot.html
-	@echo "$(GREEN)График сохранен в tests/load/plot.html$(NC)"
 
 # Линтинг и форматирование
 lint: ## Запустить линтер
